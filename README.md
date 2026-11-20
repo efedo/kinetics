@@ -37,7 +37,7 @@ The original was written in 16-bit Borland C++. This version uses **SDL3** for t
    - The Residuals tab lists each point's deviation from the curve.
 4. **Keep the results.** Write report (Alt+P) adds a report to a text file, and Copy report puts it on the clipboard.
 
-For a file with many runs, import it from the File menu, then fit one run or all of them on the File runs tab. The Help menu covers each step in more detail. Under View > Theme you can choose a light or dark theme.
+For a file with many runs, import it from the File menu, then fit one run or all of them on the File runs tab. The Help menu covers each step in more detail. The theme follows the system's light or dark setting unless you choose one under View > Theme, and View > Text size (Ctrl+= and Ctrl+-) makes the text larger or smaller.
 
 To use the original 1992 interface instead, choose View > Classic interface or press Ctrl+F12 (see [Classic interface](#classic-interface)).
 
@@ -144,7 +144,8 @@ Then open <http://localhost:8765>. Browsers will not load WebAssembly from a `fi
 The window keeps the original menu structure (File, Edit, Calculate, View, Help) and its Alt-key shortcuts.
 
 - **Left panel:** the equation, the data table, the Fit button, and the folded Fitting options (the parameter table with its Fixed check boxes, values and optional bounds; the minimization method; initial estimates; the iteration limit). The Fitting options open by themselves when a setting differs from the default or a fit does not converge, and show a one-line summary when folded. Type in the last row of the data table to add points, right-click a row number to insert or delete a row, or paste two columns from a spreadsheet.
-- **Right panel:** a getting-started page until there is something to show, then tabs: Results, Graph, Residuals, Standard curve and Report after a fit, and File runs after a file is imported.
+- **Right panel:** a getting-started page until there is something to show, then tabs: Results, Graph, Residuals, Standard curve and Report after a fit, and File runs after a file is imported (its close button, or File > Close imported file, puts the file away). The Results tab rounds each value to the precision of its standard deviation (Km = 2.71 ± 0.14) and shows all the digits in a tooltip; reports keep every digit. When the data or settings change after a fit, the results are greyed out under a note until you fit again.
+- **Labels and shortcuts:** labels come before the fields they name, and keyboard shortcuts are listed in the menus and in each button's tooltip rather than on the buttons. Fit (F5) with an empty table puts the cursor in the table with a note saying what to enter.
 
 | Key | Action | Key | Action |
 |---|---|---|---|
@@ -156,6 +157,7 @@ The window keeps the original menu structure (File, Edit, Calculate, View, Help)
 | Alt+D | Data table | Alt+P | Write report |
 | Alt+M | Load the imported run into the table | Alt+H / F1 | Help |
 | Ctrl+O / Ctrl+S | Open / save the data table | Alt+Q | Quit (desktop) |
+| Ctrl+= / Ctrl+- | Larger / smaller text | Ctrl+0 | Normal text size |
 
 **Example data** is in [`examples/`](examples/), and can also be opened from File > Open example:
 
@@ -171,7 +173,7 @@ The window keeps the original menu structure (File, Edit, Calculate, View, Help)
 - *Spreadsheet and MPA files:* the v3.51 formats, described under Help > Using file data.
 - *Reports:* text files, appended run after run. SHORT and MEDIUM reports can be comma-separated for spreadsheets.
 
-**Preferences** (report options, method, theme, last folder) are saved in `kinetics.ini` in the per-user application data folder (`%APPDATA%\SB\Kinetics` on Windows). This file replaces `INPUT.DAT` and `OUTPUT.DAT`.
+**Preferences** (report options, method, theme, text size, last folder) are saved in `kinetics.ini` in the per-user application data folder (`%APPDATA%\Kinetics` on Windows). Preferences saved by earlier versions in `%APPDATA%\SB\Kinetics` are moved there on the first start. This file replaces `INPUT.DAT` and `OUTPUT.DAT`.
 
 **Command line (desktop).** All options are optional. They are useful for scripting and for producing screenshots. The web build accepts the same options as URL parameters.
 
@@ -186,7 +188,8 @@ Kinetics --model b --import examples/spreadsheet_runs.txt --analyse-all --report
 - `--analyse-all`: fit every run of the imported file
 - `--report <file>`: append reports to the file
 - `--tab <name>`, `--plot <1-10>`, `--show help|about|report-options|fit-options`: choose the view
-- `--theme dark|light|system`: colour theme (also under View > Theme; dark by default)
+- `--theme system|dark|light`: colour theme (also under View > Theme; by default the same as the system)
+- `--text-size <80-150>`: text size in percent (also under View > Text size; 100 by default)
 - `--classic`: start in the classic interface; `--classic-keys "alt+g,n"` also types those keys into it (for screenshots: text and key names such as `enter`, `esc`, `up`, `f1`, `alt+x`)
 - `--size <W>x<H>`: window size
 - `--screenshot <file.bmp>`: render off-screen, save the image and exit

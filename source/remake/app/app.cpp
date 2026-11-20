@@ -52,7 +52,8 @@ void App::load_settings() {
     numberPoints_ = s.get_bool("plot.numberPoints", true);
     import_.negativeIsMissing = s.get_bool("import.negativeIsMissing", true);
     import_.mpaCount = std::max(1, s.get_int("import.mpaCount", 8));
-    if (auto t = theme_from_name(s.get("view.theme", "dark"))) set_theme(*t);
+    if (auto t = theme_from_name(s.get("view.theme", "system"))) set_theme(*t);
+    set_text_scale(s.get_int("view.textSize", 100));
 }
 
 void App::save_settings() const {
@@ -74,6 +75,7 @@ void App::save_settings() const {
     s.set_bool("import.negativeIsMissing", import_.negativeIsMissing);
     s.set_int("import.mpaCount", import_.mpaCount);
     s.set("view.theme", theme_name(theme_choice()));
+    s.set_int("view.textSize", textScale_);
     std::error_code ec;
     std::filesystem::create_directories(prefDir_, ec);
     if (s.save(prefDir_ / "kinetics.ini")) persist_file(prefDir_ / "kinetics.ini");
@@ -113,6 +115,67 @@ bool App::v0_measured() const {
     for (const auto& p : table_points())
         if (p.x == 0.0 && std::isfinite(p.y)) return true;
     return false;
+}
+
+bool App::results_stale() const {
+    // While a run from the file analysis is shown, the table's state does not
+    // apply to it.
+    return analysis_ && stale_ && !(batch_.selected >= 0 && analysisRun_);
+}
+
+void App::close_import() {
+    const bool showingRun = batch_.selected >= 0 && analysisRun_.has_value();
+    ImportState fresh;
+    fresh.negativeIsMissing = import_.negativeIsMissing;  // preferences, not the file
+    fresh.mpaCount = import_.mpaCount;
+    import_ = std::move(fresh);
+    batch_ = BatchState{};
+    // Results of one of the file's runs go with the file.
+    if (showingRun) {
+        analysis_.reset();
+        analysisRun_.reset();
+        stale_ = false;
+    }
+}
+
+std::string App::report_file_tooltip() const {
+    std::string s = "Add this report to the report file (Alt+P). ";
+    if (kIsWeb) return s + "The whole report file is downloaded each time.";
+    if (report_.file.empty()) return s + "You will be asked for a file.";
+    return s + (report_.newFile ? "Starts " : "Appends to ") + report_.file.filename().string() + ".";
+}
+
+void App::set_text_scale(int percent) {
+    textScale_ = std::clamp(percent, kTextScales.front(), kTextScales.back());
+    ImGui::GetStyle().FontScaleMain = static_cast<float>(textScale_) / 100.0f;
+}
+
+void App::step_text_scale(int direction) {
+    // The next listed size up or down from the current one.
+    int next = textScale_;
+    if (direction > 0) {
+        for (int pct : kTextScales)
+            if (pct > textScale_) {
+                next = pct;
+                break;
+            }
+    } else {
+        for (int pct : kTextScales)
+            if (pct < textScale_) next = pct;
+    }
+    if (next == textScale_) return;
+    set_text_scale(next);
+    save_settings();
+}
+
+std::string plain_model_label(kin::ModelId model, const std::vector<kin::ParamSetting>& params) {
+    const auto& def = kin::model_def(model);
+    std::string fixed;
+    for (size_t j = 0; j < params.size() && j < def.params.size(); ++j)
+        if (params[j].fixed) fixed += (fixed.empty() ? "" : ", ") + std::string(def.params[j].name);
+    std::string s(def.menuName);
+    if (!fixed.empty()) s += " (" + fixed + " fixed)";
+    return s;
 }
 
 bool App::fit_settings_are_default() const {
@@ -269,7 +332,9 @@ kin::AnalysisRequest App::make_request(std::vector<kin::Point> data) const {
 void App::request_fit() {
     const auto pts = kin::clean_data(table_points());
     if (pts.empty()) {
-        error("No data entered.");
+        // A note above the table says what to do, and the cursor goes there.
+        showEmptyHint_ = true;
+        focusTable_ = true;
         return;
     }
     if (kin::too_few_points(model_, params_, pts.size())) {
@@ -363,7 +428,7 @@ bool App::load_selected_run_into_table() {
         dataRun_ = import_.selectedRun;
         return true;
     }
-    error("No file imported. Use File > Import spreadsheet file or Import MPA file.");
+    error("No file is imported. Use File > Import spreadsheet file of runs, or Import plate-reader file.");
     return false;
 }
 
@@ -400,7 +465,7 @@ void App::analyse_all_runs() {
             return;
         }
     } else {
-        error("No file imported. Use File > Import spreadsheet file or Import MPA file.");
+        error("No file is imported. Use File > Import spreadsheet file of runs, or Import plate-reader file.");
         return;
     }
     int ok = 0;
@@ -469,7 +534,7 @@ bool App::append_report(const kin::Analysis& a, std::optional<int> runNumber) {
 
 void App::write_report() {
     if (!analysis_) {
-        error("Parameters NOT calculated.");
+        error("There are no results to report yet: fit the data first (F5).");
         return;
     }
     if (report_.file.empty()) {
@@ -504,7 +569,7 @@ void App::write_batch_reports() {
 void App::copy_report() {
     const auto text = current_report_text(false);
     if (text.empty()) {
-        error("Parameters NOT calculated.");
+        error("There are no results to report yet: fit the data first (F5).");
         return;
     }
     ImGui::SetClipboardText(text.c_str());
@@ -588,7 +653,7 @@ bool App::frame() {
 }
 
 void App::draw_header() {
-    const auto desc = kin::model_description(model_, params_);
+    const auto desc = plain_model_label(model_, params_);
     int invalid = 0;
     const auto pts = kin::clean_data(table_points(&invalid));
     ImGui::TextUnformatted(desc.c_str());
@@ -619,9 +684,12 @@ void App::draw_menu_bar() {
         if (ImGui::MenuItem("Save data table...", "Ctrl+S"))
             show_save_dialog(FilePurpose::SaveTable, tablePath_.empty() ? default_dir() + "data.csv" : tablePath_.string());
         ImGui::Separator();
-        if (ImGui::MenuItem("Import spreadsheet file ([S] and v)..."))
+        if (ImGui::MenuItem("Import spreadsheet file of runs..."))
             show_open_dialog(FilePurpose::ImportSpreadsheet, default_dir());
-        if (ImGui::MenuItem("Import MPA data file (v only)...")) show_open_dialog(FilePurpose::ImportMpa, default_dir());
+        ImGui::SetItemTooltip("Concentrations, then one row of velocities per run");
+        if (ImGui::MenuItem("Import plate-reader file (MPA, velocities only)..."))
+            show_open_dialog(FilePurpose::ImportMpa, default_dir());
+        if (ImGui::MenuItem("Close imported file", nullptr, false, haveImport)) close_import();
         if (ImGui::BeginMenu("Open example")) {
             if (ImGui::MenuItem("Michaelis-Menten data table")) open_example(Example::MichaelisMenten);
             if (ImGui::MenuItem("Arrhenius data table")) open_example(Example::Arrhenius);
@@ -640,7 +708,7 @@ void App::draw_menu_bar() {
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Edit")) {
-        if (ImGui::BeginMenu("Equation type", true)) {
+        if (ImGui::BeginMenu("Equation", true)) {
             for (const auto& m : kin::all_models()) {
                 const std::string label = std::string(1, m.letter) + ". " + std::string(m.menuName);
                 if (ImGui::MenuItem(label.c_str(), nullptr, m.id == model_) && m.id != model_) set_model(m.id);
@@ -669,19 +737,21 @@ void App::draw_menu_bar() {
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Calculate")) {
-        if (ImGui::MenuItem("Parameters from table data", "Alt+R / F5")) request_fit();
-        if (ImGui::MenuItem("Parameters from file data: single run", "Alt+S", false, haveImport)) fit_selected_run();
-        if (ImGui::MenuItem("Parameters from file data: all runs", "Alt+A", false, haveImport)) {
+        const auto& def = kin::model_def(analysis_ ? analysis_->model() : model_);
+        const std::string xName(def.xName), yName(def.yName);
+        if (ImGui::MenuItem("Fit table data", "F5 / Alt+R")) request_fit();
+        if (ImGui::MenuItem("Fit the selected file run", "Alt+S", false, haveImport)) fit_selected_run();
+        if (ImGui::MenuItem("Fit all file runs", "Alt+A", false, haveImport)) {
             requestedTab_ = Tab::FileRuns;
             analyse_all_runs();
         }
-        if (ImGui::MenuItem("Preview file runs", "Alt+W", false, haveImport)) requestedTab_ = Tab::FileRuns;
+        if (ImGui::MenuItem("Show file runs", "Alt+W", false, haveImport)) requestedTab_ = Tab::FileRuns;
         ImGui::Separator();
-        if (ImGui::MenuItem("New X value for an entered Y value", "Alt+X", false, haveFit)) {
+        if (ImGui::MenuItem(("Find " + xName + " for a given " + yName + "...").c_str(), "Alt+X", false, haveFit)) {
             requestedTab_ = Tab::StandardCurve;
             focusStdX_ = true;
         }
-        if (ImGui::MenuItem("New Y value for an entered X value", "Alt+Y", false, haveFit)) {
+        if (ImGui::MenuItem(("Find " + yName + " for a given " + xName + "...").c_str(), "Alt+Y", false, haveFit)) {
             requestedTab_ = Tab::StandardCurve;
             focusStdY_ = true;
         }
@@ -696,7 +766,7 @@ void App::draw_menu_bar() {
             mark_stale();
             openFitOptions_ = true;  // the estimates are entered there
         }
-        ImGui::TextDisabled("Minimization");
+        ImGui::TextDisabled("Fitting method");
         if (ImGui::MenuItem("Marquardt-Levenberg", nullptr, method_ == kin::Method::Marquardt)) {
             method_ = kin::Method::Marquardt;
             mark_stale();
@@ -709,14 +779,27 @@ void App::draw_menu_bar() {
     }
     if (ImGui::BeginMenu("View")) {
         // The tabs other than Results appear once they have something to show.
-        if (ImGui::MenuItem("Calculated parameters", "Alt+L")) requestedTab_ = Tab::Results;
+        if (ImGui::MenuItem("Results", "Alt+L")) requestedTab_ = Tab::Results;
         if (ImGui::MenuItem("Graph", "Alt+G", false, haveFit)) requestedTab_ = Tab::Graph;
         if (ImGui::MenuItem("Residuals", "Alt+I", false, haveFit)) requestedTab_ = Tab::Residuals;
         if (ImGui::MenuItem("Standard curve", nullptr, false, haveFit)) requestedTab_ = Tab::StandardCurve;
         if (ImGui::MenuItem("File runs", nullptr, false, haveImport)) requestedTab_ = Tab::FileRuns;
-        if (ImGui::MenuItem("Report preview", nullptr, false, haveFit)) requestedTab_ = Tab::Report;
+        if (ImGui::MenuItem("Report", nullptr, false, haveFit)) requestedTab_ = Tab::Report;
         ImGui::Separator();
         if (ImGui::MenuItem("Classic interface (v3.51)", "Ctrl+F12")) classicRequested_ = true;
+        if (ImGui::BeginMenu("Text size")) {
+            if (ImGui::MenuItem("Larger", "Ctrl+=", false, textScale_ < kTextScales.back())) step_text_scale(+1);
+            if (ImGui::MenuItem("Smaller", "Ctrl+-", false, textScale_ > kTextScales.front())) step_text_scale(-1);
+            ImGui::Separator();
+            for (int pct : kTextScales) {
+                const std::string label = std::to_string(pct) + "%";
+                if (ImGui::MenuItem(label.c_str(), pct == 100 ? "Ctrl+0" : nullptr, textScale_ == pct) && pct != textScale_) {
+                    set_text_scale(pct);
+                    save_settings();
+                }
+            }
+            ImGui::EndMenu();
+        }
         if (ImGui::BeginMenu("Theme")) {
             const ThemeChoice now = theme_choice();
             for (const auto& [choice, label] : {std::pair{ThemeChoice::Dark, "Dark"},
@@ -776,6 +859,16 @@ void App::handle_shortcuts() {
     if (Shortcut(ImGuiMod_Ctrl | ImGuiKey_O, g)) show_open_dialog(FilePurpose::OpenTable, default_dir());
     if (Shortcut(ImGuiMod_Ctrl | ImGuiKey_S, g))
         show_save_dialog(FilePurpose::SaveTable, tablePath_.empty() ? default_dir() + "data.csv" : tablePath_.string());
+    // Text size: Ctrl+= (or Ctrl++), Ctrl+-, Ctrl+0, also on the keypad.
+    if (Shortcut(ImGuiMod_Ctrl | ImGuiKey_Equal, g) || Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Equal, g) ||
+        Shortcut(ImGuiMod_Ctrl | ImGuiKey_KeypadAdd, g))
+        step_text_scale(+1);
+    if (Shortcut(ImGuiMod_Ctrl | ImGuiKey_Minus, g) || Shortcut(ImGuiMod_Ctrl | ImGuiKey_KeypadSubtract, g))
+        step_text_scale(-1);
+    if ((Shortcut(ImGuiMod_Ctrl | ImGuiKey_0, g) || Shortcut(ImGuiMod_Ctrl | ImGuiKey_Keypad0, g)) && textScale_ != 100) {
+        set_text_scale(100);
+        save_settings();
+    }
 }
 
 }  // namespace app

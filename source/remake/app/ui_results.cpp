@@ -9,8 +9,99 @@
 #include "app/app.hpp"
 #include "app/theme.hpp"
 #include "app/ui_common.hpp"
+#include "core/stats.hpp"
 
 namespace app {
+namespace {
+
+struct PlainLine {
+    std::string text;
+    bool warn = false;  // shown in amber
+};
+
+std::string p_text(double p) { return p < 0.0001 ? std::string("P < 0.0001") : "P = " + kin::fmt_g(p, 2); }
+
+std::string range_text(double lo, double hi) {
+    char buf[64];
+    std::snprintf(buf, sizeof buf, "%.2f\xE2\x80\x93%.2f", lo, hi);
+    return buf;
+}
+
+// "X differs significantly from 1 (P = 0.00014; t = 10.4, 5 df)."
+PlainLine significance(const std::string& subject, const char* versus, double t, int df, double p) {
+    const bool sig = p < 0.05;
+    return {subject + (sig ? " differs significantly from " : " is not significantly different from ") + versus + " (" +
+                p_text(p) + "; t = " + kin::fmt_g(t, 3) + ", " + std::to_string(df) + " df).",
+            false};
+}
+
+// The v3.51 interpretation lines (Analysis::interpretation, which the
+// report keeps) in plainer words for the screen.
+std::vector<PlainLine> plain_interpretation(const kin::Analysis& a) {
+    std::vector<PlainLine> out;
+    const auto m = a.model();
+    const auto& def = kin::model_def(m);
+    const auto& p = a.fit.p;
+    if (a.linear) {
+        const auto& lr = *a.linear;
+        out.push_back({"Correlation coefficient r = " + kin::fmt_g(lr.r, 4) + " \xC2\xB1 " + kin::fmt_g(lr.sdR, 2) + "."});
+        out.push_back(significance("The slope", "0", lr.tSlopeVs0, lr.df, lr.pSlopeVs0));
+        out.push_back(significance("The slope", "1", lr.tSlopeVs1, lr.df, lr.pSlopeVs1));
+        if (!lr.interceptFixed) out.push_back(significance("The intercept", "0", lr.tIntercept, lr.df, lr.pIntercept));
+        out.push_back({"Regression F = " + kin::fmt_g(lr.fRegression, 4) + " (1 and " + std::to_string(lr.df) + " df), " +
+                       p_text(lr.pRegression) + "."});
+        if (lr.replicates && lr.dfDeviation > 0 && lr.ssPureError > 0.0)
+            out.push_back({"Lack of fit, from the replicated X values: F = " + kin::fmt_g(lr.fLackOfFit, 4) + " (" +
+                               std::to_string(lr.dfDeviation) + " and " + std::to_string(lr.dfPureError) + " df), " +
+                               p_text(lr.pLackOfFit) + ".",
+                           lr.pLackOfFit < 0.05});
+        return out;
+    }
+    if (def.family == kin::Family::Arrhenius) return out;
+
+    const auto iK = kin::param_index(m, kin::Role::HalfSat);
+    const auto iV = kin::param_index(m, kin::Role::Vmax);
+    const auto iV0 = kin::param_index(m, kin::Role::V0);
+    const auto ih = kin::param_index(m, kin::Role::HillCoeff);
+    const bool inhibition = def.family == kin::Family::Inhibition;
+    const std::string xName(def.xName);
+    if (iK) {
+        const double K = p[static_cast<size_t>(*iK)];
+        const std::string k(def.params[static_cast<size_t>(*iK)].name);
+        out.push_back({xName + " spans " + range_text(a.xMin / K, a.xMax / K) + " \xC3\x97 " + k +
+                       "; about 0.2\xE2\x80\x93" "5 \xC3\x97 " + k + " is a good range."});
+    }
+    if (!inhibition && iV) {
+        const double V = p[static_cast<size_t>(*iV)];
+        out.push_back({"v spans " + range_text(a.yMin / V, a.yMax / V) + " \xC3\x97 Vmax."});
+    } else if (inhibition && iV0) {
+        const double v0 = p[static_cast<size_t>(*iV0)];
+        out.push_back({"v spans " + range_text(a.yMin / v0, a.yMax / v0) + " \xC3\x97 v0."});
+    }
+    if (def.family == kin::Family::Activation && iV && iV0) {
+        const double v0 = p[static_cast<size_t>(*iV0)];
+        out.push_back({"Fold activation (Vmax / v0): " +
+                       (v0 != 0.0 ? kin::fmt_g(p[static_cast<size_t>(*iV)] / v0, 3) : std::string("infinite")) + "."});
+    }
+    if (ih) {
+        const size_t j = static_cast<size_t>(*ih);
+        if (a.fit.fixed[j]) {
+            out.push_back({"The Hill coefficient was fixed, so it was not tested against 1."});
+        } else if (std::isfinite(a.fit.sd[j]) && a.fit.sd[j] > 0.0 && a.fit.dof > 0) {
+            const double t = std::fabs(p[j] - 1.0) / a.fit.sd[j];
+            const double pt = kin::t_two_tailed_p(t, a.fit.dof);
+            auto line = significance("The Hill coefficient", "1", t, a.fit.dof, pt);
+            if (pt >= 0.05 && def.family == kin::Family::Hill)
+                line.text += " The Michaelis-Menten equation may describe these data as well.";
+            else if (pt >= 0.05 && def.family == kin::Family::Activation)
+                line.text += " The activator equation with h = 1 may describe these data as well.";
+            out.push_back(line);
+        }
+    }
+    return out;
+}
+
+}  // namespace
 
 void App::draw_right_panel() {
     const bool haveImport = import_.type != ImportType::None;
@@ -22,29 +113,41 @@ void App::draw_right_panel() {
         ImGui::EndChild();
         return;
     }
+    // Results from data that have since changed are greyed out, with a note
+    // saying why.
+    const bool stale = results_stale();
+    if (stale) {
+        warning_text("The data or settings have changed since this fit. Press Fit (F5) to update the results.", "");
+        ImGui::Spacing();
+    }
     if (!ImGui::BeginTabBar("##tabs", ImGuiTabBarFlags_DrawSelectedOverline)) return;
-    auto tab = [&](const char* label, Tab t, void (App::*fn)()) {
+    auto tab = [&](const char* label, Tab t, void (App::*fn)(), bool* open = nullptr) {
         const ImGuiTabItemFlags f = (requestedTab_ && *requestedTab_ == t) ? ImGuiTabItemFlags_SetSelected : 0;
-        if (ImGui::BeginTabItem(label, nullptr, f)) {
+        if (ImGui::BeginTabItem(label, open, f)) {
+            const bool dim = stale && t != Tab::FileRuns;
+            if (dim) ImGui::PushStyleVar(ImGuiStyleVar_Alpha, kStaleAlpha);
             if (ImGui::BeginChild("##tabcontent", ImVec2(0, 0), ImGuiChildFlags_None,
                                   t == Tab::Graph ? ImGuiWindowFlags_NoScrollbar : 0))
                 (this->*fn)();
             ImGui::EndChild();
+            if (dim) ImGui::PopStyleVar();
             ImGui::EndTabItem();
         }
     };
     // Each tab appears once it has something to show.
     const bool haveFit = analysis_.has_value();
+    bool keepFile = true;
     tab("Results", Tab::Results, &App::draw_results_tab);
     if (haveFit) {
         tab("Graph", Tab::Graph, &App::draw_graph_tab);
         tab("Residuals", Tab::Residuals, &App::draw_residuals_tab);
         tab("Standard curve", Tab::StandardCurve, &App::draw_standard_curve_tab);
     }
-    if (haveImport) tab("File runs", Tab::FileRuns, &App::draw_file_runs_tab);
+    if (haveImport) tab("File runs", Tab::FileRuns, &App::draw_file_runs_tab, &keepFile);
     if (haveFit) tab("Report", Tab::Report, &App::draw_report_tab);
     requestedTab_.reset();
     ImGui::EndTabBar();
+    if (!keepFile) close_import();  // the tab's close button
 }
 
 void App::draw_getting_started() {
@@ -140,45 +243,65 @@ void App::draw_results_tab() {
     if (batch_.selected >= 0 && analysisRun_)
         ImGui::Text("Run #%d of %s", *analysisRun_, import_.path.filename().string().c_str());
 
-    ImGui::Text("%s", a.description.c_str());
-    ImGui::Spacing();
-    ImGui::Text("RESULTS of %s", a.method_title().c_str());
-    if (!a.linear) {
-        if (a.fit.status == kin::FitStatus::Converged) ImGui::TextUnformatted(a.fit.message.c_str());
-        else ImGui::TextColored(palette().warning, "%s", a.fit.message.c_str());
-        ImGui::Text("# of iterations = %d        1 Std. deviation = %s", a.fit.iterations, kin::fmt_g(a.fit.stdDev).c_str());
-    } else {
-        ImGui::Text("Residual std. deviation = %s", kin::fmt_g(a.fit.stdDev).c_str());
-    }
+    // What was fitted, and how the fit went.
+    ImGui::TextUnformatted(plain_model_label(a.model(), a.request.params).c_str());
+    if (!a.linear && a.fit.status != kin::FitStatus::Converged) warning_text(a.fit.message.c_str(), "");
     {
-        char buf[128];
-        std::snprintf(buf, sizeof buf, "%d points, %d free parameter%s, %d degrees of freedom", a.fit.n, a.fit.nFree,
-                      a.fit.nFree == 1 ? "" : "s", a.linear ? a.linear->df : a.fit.dof);
-        item_tooltip(buf);
+        const std::string sd = kin::fmt_g(a.fit.stdDev, 3);
+        const char* method = a.fit.method == kin::Method::GaussNewton ? "Gauss-Newton" : "Marquardt-Levenberg";
+        const int it = a.fit.iterations;
+        char buf[256];
+        if (a.linear)
+            std::snprintf(buf, sizeof buf, "Linear regression, %d points. Residual SD %s.", a.fit.n, sd.c_str());
+        else
+            std::snprintf(buf, sizeof buf, "%s %d iteration%s (%s), %d points. Residual SD %s.",
+                          a.fit.status == kin::FitStatus::Converged ? "Converged after" : "Stopped after", it,
+                          it == 1 ? "" : "s", method, a.fit.n, sd.c_str());
+        ImGui::TextDisabled("%s", buf);
+        const int df = a.linear ? a.linear->df : a.fit.dof;
+        item_tooltip("The residual SD is the typical distance of a point from the fitted curve (" +
+                     kin::fmt_g(a.fit.stdDev) + "). " + std::to_string(a.fit.nFree) + " free parameter" +
+                     (a.fit.nFree == 1 ? "" : "s") + ", " + std::to_string(df) + " degrees of freedom.");
     }
-    ImGui::Spacing();
 
+    ImGui::SeparatorText("Best-fit parameters");
     if (ImGui::BeginTable("##results", 5, ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_RowBg |
                                               ImGuiTableFlags_SizingFixedFit)) {
-        ImGui::TableSetupColumn("Parameter", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 9.0f);
-        ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 7.0f);
-        ImGui::TableSetupColumn("+/- 1 SD", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 7.0f);
-        ImGui::TableSetupColumn("SD %", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 4.5f);
+        const float fs = ImGui::GetFontSize();
+        ImGui::TableSetupColumn("Parameter", ImGuiTableColumnFlags_WidthFixed, fs * 9.0f);
+        ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthFixed, fs * 7.0f);
+        ImGui::TableSetupColumn("\xC2\xB1 SD", ImGuiTableColumnFlags_WidthFixed, fs * 6.0f);
+        ImGui::TableSetupColumn("Relative SD", ImGuiTableColumnFlags_WidthFixed, fs * 6.0f);
         ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableHeadersRow();
+        ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
+        for (int c = 0; c < 5; ++c) {
+            ImGui::TableSetColumnIndex(c);
+            ImGui::TableHeader(ImGui::TableGetColumnName(c));
+            if (c == 3)
+                ImGui::SetItemTooltip("The SD as a percentage of the value. Under about 10%%, the parameter is well "
+                                      "determined by the data.");
+        }
         for (const auto& r : a.parameter_rows()) {
+            const auto t = format_value_sd(r.value, r.fixed ? NAN : r.sd);
+            const double pct = r.value != 0.0 ? std::fabs(r.sd * 100.0 / r.value) : NAN;
+            const std::string full = r.name + " = " + kin::fmt_g(r.value) +
+                                     (r.fixed ? std::string(" (fixed)") : " \xC2\xB1 " + kin::fmt_g(r.sd));
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
             ImGui::TextUnformatted(r.name.c_str());
             ImGui::TableNextColumn();
-            ImGui::TextUnformatted(kin::fmt_g(r.value).c_str());
+            ImGui::TextUnformatted(t.value.c_str());
+            ImGui::SetItemTooltip("%s", full.c_str());
             ImGui::TableNextColumn();
-            ImGui::TextUnformatted(r.fixed ? "0" : kin::fmt_g(r.sd).c_str());
+            if (!r.fixed) {
+                ImGui::TextUnformatted(t.sd.empty() ? "n/a" : t.sd.c_str());
+                ImGui::SetItemTooltip("%s", full.c_str());
+            }
             ImGui::TableNextColumn();
-            if (!r.fixed && r.value != 0.0 && std::isfinite(r.sd)) {
-                const double pct = std::fabs(r.sd * 100.0 / r.value);
-                if (pct <= 10.0) ImGui::Text("%.2f%%", pct);
-                else ImGui::TextColored(palette().warning, "%.2f%%", pct);
+            if (!r.fixed && std::isfinite(pct)) {
+                const std::string p = format_percent(pct);
+                if (pct <= 10.0) ImGui::TextUnformatted(p.c_str());
+                else ImGui::TextColored(palette().warning, "%s", p.c_str());
             }
             ImGui::TableNextColumn();
             if (r.fixed) ImGui::TextDisabled("fixed");
@@ -190,9 +313,11 @@ void App::draw_results_tab() {
         ImGui::EndTable();
     }
     ImGui::Spacing();
-    for (const auto& line : a.interpretation()) {
+    for (const auto& line : plain_interpretation(a)) {
+        if (line.warn) ImGui::PushStyleColor(ImGuiCol_Text, palette().warning);
         ImGui::Bullet();
-        ImGui::TextWrapped("%s", line.c_str());
+        ImGui::TextWrapped("%s", line.text.c_str());
+        if (line.warn) ImGui::PopStyleColor();
     }
     for (const auto& note : a.notes) {
         ImGui::PushStyleColor(ImGuiCol_Text, palette().warning);
@@ -202,8 +327,10 @@ void App::draw_results_tab() {
     }
     ImGui::Spacing();
     if (ImGui::Button("Copy report")) copy_report();
+    ImGui::SetItemTooltip("Copy the report, with all digits, to the clipboard");
     ImGui::SameLine();
-    if (ImGui::Button("Write report (Alt+P)")) write_report();
+    if (ImGui::Button("Write report")) write_report();
+    item_tooltip(report_file_tooltip());
 
     if (!a.linear && ImGui::CollapsingHeader("Initial estimates and iteration history")) {
         const auto& def = kin::model_def(a.model());
@@ -254,21 +381,52 @@ void App::draw_residuals_tab() {
     }
     const auto& a = *analysis_;
     const auto& def = kin::model_def(a.model());
-    for (const auto& line : a.residual_test_lines()) ImGui::TextWrapped("%s", line.c_str());
+    const std::string xName(def.xName), yName(def.yName);
+
+    // The two randomness tests, in plain words (the report keeps v3.51's).
+    const auto& rt = a.residualTests;
+    ImGui::Text("Signs of the residuals, in order of %s:  %s", xName.c_str(), rt.sequence.c_str());
+    item_tooltip("One sign per distinct " + xName + " (replicates are averaged). A good fit scatters the points on "
+                 "both sides of the curve with no pattern.");
+    const std::string pattern = " Another equation may fit better.";
+    if (!rt.runsTestable)
+        ImGui::TextDisabled("Runs test: needs at least 8 non-zero residuals.");
+    else if (rt.runsRandom)
+        ImGui::Text("Runs test: the signs look random (%d runs, %s).", rt.runs, p_text(rt.runsP).c_str());
+    else
+        warning_text(("Runs test: the signs follow a pattern (" + std::to_string(rt.runs) + " runs, " +
+                      p_text(rt.runsP) + ")." + pattern).c_str(), "");
+    item_tooltip("Too few runs of the same sign mean the curve misses the data systematically.");
+    if (rt.signsRandom)
+        ImGui::Text("Sign test: + and \xE2\x88\x92 residuals are balanced (%d +, %d \xE2\x88\x92, %s).", rt.positives,
+                    rt.negatives, p_text(rt.signP).c_str());
+    else
+        warning_text(("Sign test: more " + std::string(rt.positives > rt.negatives ? "+ than \xE2\x88\x92" : "\xE2\x88\x92 than +") +
+                      " residuals than chance allows (" + std::to_string(rt.positives) + " +, " +
+                      std::to_string(rt.negatives) + " \xE2\x88\x92, " + p_text(rt.signP) + ")." + pattern).c_str(),
+                     "");
     ImGui::Spacing();
-    const std::string yhat = a.model() == kin::ModelId::Arrhenius ? "log10(vhat)" : std::string(def.yName) + "hat";
+
+    const std::string fitted = "Fitted " + yName;
+    const int decimals = residual_decimals(a.fit.stdDev);
     if (ImGui::BeginTable("##resid", 6, ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY |
                                             ImGuiTableFlags_SizingStretchProp,
                           ImGui::GetContentRegionAvail())) {
         ImGui::TableSetupScrollFreeze(0, 1);
-        ImGui::TableSetupColumn("Pair #", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 3.5f);
-        ImGui::TableSetupColumn(std::string(def.xName).c_str());
-        ImGui::TableSetupColumn(std::string(def.yName).c_str());
-        ImGui::TableSetupColumn(yhat.c_str());
-        ImGui::TableSetupColumn((std::string(def.yName) + " - " + yhat).c_str());
-        ImGui::TableSetupColumn("> 2 SD", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 3.5f);
-        ImGui::TableHeadersRow();  // the last header is "> 2 SD"
-        item_tooltip("* marks a residual of at least 2 standard deviations (" + kin::fmt_g(2.0 * a.fit.stdDev, 4) + ")");
+        ImGui::TableSetupColumn("#", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 2.5f);
+        ImGui::TableSetupColumn(xName.c_str());
+        ImGui::TableSetupColumn(yName.c_str());
+        ImGui::TableSetupColumn(fitted.c_str());
+        ImGui::TableSetupColumn("Residual");
+        ImGui::TableSetupColumn("Outlier?", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 4.5f);
+        ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
+        for (int c = 0; c < 6; ++c) {
+            ImGui::TableSetColumnIndex(c);
+            ImGui::TableHeader(ImGui::TableGetColumnName(c));
+            if (c == 4) ImGui::SetItemTooltip("%s minus the fitted value", yName.c_str());
+            if (c == 5)
+                item_tooltip("* marks a residual of at least 2 residual SDs (" + kin::fmt_g(2.0 * a.fit.stdDev, 3) + ")");
+        }
         for (size_t i = 0; i < a.data.size(); ++i) {
             const bool big = a.largeResidual[i];
             if (big) ImGui::PushStyleColor(ImGuiCol_Text, palette().warning);
@@ -280,9 +438,11 @@ void App::draw_residuals_tab() {
             ImGui::TableNextColumn();
             ImGui::TextUnformatted(kin::fmt_g(a.data[i].y).c_str());
             ImGui::TableNextColumn();
-            ImGui::TextUnformatted(kin::fmt_g(a.yhat[i]).c_str());
+            ImGui::TextUnformatted(format_fixed(a.yhat[i], decimals).c_str());
+            ImGui::SetItemTooltip("%s", kin::fmt_g(a.yhat[i]).c_str());
             ImGui::TableNextColumn();
-            ImGui::Text("%+.5e", a.resid[i]);
+            ImGui::TextUnformatted(format_fixed(a.resid[i], decimals, true).c_str());
+            ImGui::SetItemTooltip("%s", kin::fmt_g(a.resid[i]).c_str());
             ImGui::TableNextColumn();
             ImGui::TextUnformatted(big ? "*" : "");
             if (big) ImGui::PopStyleColor();
@@ -303,14 +463,25 @@ void App::draw_standard_curve_tab() {
     const std::string yRange = "Data range: " + yName + " from " + kin::fmt_g(a.yMin) + " to " + kin::fmt_g(a.yMax);
     const float w = ImGui::GetFontSize() * 9.0f;
 
-    ImGui::SeparatorText(("New " + xName + " for an entered " + yName + "  (Alt+X)").c_str());
+    // Fixed-width labels so that the two input boxes line up.
+    const float labelWidth = std::max(ImGui::CalcTextSize(xName.c_str()).x, ImGui::CalcTextSize(yName.c_str()).x) +
+                             ImGui::GetStyle().ItemSpacing.x;
+    auto label = [&](const std::string& text) {
+        const float x = ImGui::GetCursorPosX();
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(text.c_str());
+        ImGui::SameLine(x + labelWidth);
+    };
+
+    ImGui::SeparatorText(("Find " + xName + " for a given " + yName).c_str());
     if (focusStdX_) {
         ImGui::SetKeyboardFocusHere();
         focusStdX_ = false;
     }
+    label(yName);
     ImGui::SetNextItemWidth(w);
-    bool go = ImGui::InputDouble((yName + "##stdY").c_str(), &stdInputY_, 0, 0, "%.6g", ImGuiInputTextFlags_EnterReturnsTrue);
-    item_tooltip(yRange);
+    bool go = ImGui::InputDouble("##stdY", &stdInputY_, 0, 0, "%.6g", ImGuiInputTextFlags_EnterReturnsTrue);
+    item_tooltip(yRange + ". Shortcut: Alt+X.");
     ImGui::SameLine();
     go |= ImGui::Button("Calculate##x");
     if (go) {
@@ -322,14 +493,15 @@ void App::draw_standard_curve_tab() {
         stdCurve_.insert(stdCurve_.begin(), e);
     }
 
-    ImGui::SeparatorText(("New " + yName + " for an entered " + xName + "  (Alt+Y)").c_str());
+    ImGui::SeparatorText(("Find " + yName + " for a given " + xName).c_str());
     if (focusStdY_) {
         ImGui::SetKeyboardFocusHere();
         focusStdY_ = false;
     }
+    label(xName);
     ImGui::SetNextItemWidth(w);
-    go = ImGui::InputDouble((xName + "##stdX").c_str(), &stdInputX_, 0, 0, "%.6g", ImGuiInputTextFlags_EnterReturnsTrue);
-    item_tooltip(xRange);
+    go = ImGui::InputDouble("##stdX", &stdInputX_, 0, 0, "%.6g", ImGuiInputTextFlags_EnterReturnsTrue);
+    item_tooltip(xRange + ". Shortcut: Alt+Y.");
     ImGui::SameLine();
     go |= ImGui::Button("Calculate##y");
     if (go) {
@@ -369,7 +541,8 @@ void App::draw_standard_curve_tab() {
             else ImGui::TextColored(palette().bad, "cannot be calculated");
             ImGui::TableNextColumn();
             if (e.outOfRange)
-                ImGui::TextColored(palette().bad, "%s outside curve range!", (e.xFromY ? yName : xName).c_str());
+                ImGui::TextColored(palette().bad, "%s is outside the range of the data",
+                                   (e.xFromY ? yName : xName).c_str());
         }
         ImGui::EndTable();
     }
@@ -377,8 +550,9 @@ void App::draw_standard_curve_tab() {
 
 void App::draw_report_tab() {
     auto& o = report_.options;
+    field_label("Format");
     ImGui::SetNextItemWidth(ImGui::GetFontSize() * 16.0f);
-    if (ImGui::BeginCombo("Format", kin::report_format_name(o.format).c_str())) {
+    if (ImGui::BeginCombo("##format", kin::report_format_name(o.format).c_str())) {
         for (auto f : {kin::ReportFormat::Short, kin::ReportFormat::Medium, kin::ReportFormat::Long})
             if (ImGui::Selectable(kin::report_format_name(f).c_str(), f == o.format)) o.format = f;
         ImGui::EndCombo();
@@ -392,14 +566,14 @@ void App::draw_report_tab() {
         o.layout = static_cast<kin::ReportLayout>(layout);
     }
     ImGui::BeginDisabled(!analysis_);
-    if (ImGui::Button("Write report (Alt+P)")) write_report();
-    if (kIsWeb) item_tooltip("The whole report file is downloaded each time you write a report.");
-    else if (report_.file.empty()) item_tooltip("You will be asked for a report file.");
+    if (ImGui::Button("Write report")) write_report();
+    item_tooltip(report_file_tooltip());
     ImGui::SameLine();
     if (ImGui::Button("Copy to clipboard")) copy_report();
     ImGui::EndDisabled();
     ImGui::SameLine();
-    if (ImGui::Button("Report options... (Alt+O)")) openReportOptions_ = true;
+    if (ImGui::Button("Report options...")) openReportOptions_ = true;
+    ImGui::SetItemTooltip("Header, date, numbering and the report file (Alt+O)");
     if (kIsWeb || !report_.file.empty()) {
         const std::string file = kIsWeb ? (report_.file.empty() ? std::string("results.txt") : report_.file.filename().string())
                                         : report_.file.string();

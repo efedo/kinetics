@@ -56,7 +56,8 @@ constexpr Scheme kLight{
     with_alpha(kBlack, 0.25f),
 };
 
-ThemeChoice g_choice = ThemeChoice::Dark;
+// Follow the system's light or dark setting unless the user picks one.
+ThemeChoice g_choice = ThemeChoice::System;
 const Scheme* g_scheme = &kDark;
 
 const Scheme& resolve(ThemeChoice choice) {

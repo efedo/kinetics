@@ -7,7 +7,7 @@ namespace {
 
 constexpr HelpTopic kTopics[] = {
     {"Choosing an equation",
-     "Select an equation from the Equation list (or Edit > Equation type, Alt+T).\n\n"
+     "Select an equation from the Equation list (or Edit > Equation, Alt+T).\n\n"
      "The Michaelis-Menten and Hill equations describe single-substrate reactions. The Hill equation "
      "allows for cooperativity between enzyme subunits, which gives velocity vs. [S] curves that are "
      "sigmoidal rather than rectangular hyperbolas. Two Hill equations are offered: h > 0 and h >= 1. "
@@ -51,8 +51,10 @@ constexpr HelpTopic kTopics[] = {
 
     {"Using file data",
      "You can analyse data saved as a text file in either of two formats. Choose File > Import "
-     "spreadsheet file or File > Import MPA data file. The runs in the file are listed on the File runs "
-     "tab, where you can load a run into the data table, fit a single run, or analyse every run.\n\n"
+     "spreadsheet file of runs or File > Import plate-reader file (MPA). The runs in the file are listed "
+     "on the File runs tab, where you can load a run into the data table, fit a single run, or analyse "
+     "every run. Close the tab, or choose File > Close imported file, when you have finished with the "
+     "file.\n\n"
      "A spreadsheet file can be produced by Lotus 1-2-3, Quattro Pro or any spreadsheet by printing "
      "the data to a file, or by saving it as text. The format is:\n\n"
      "    S=NS\n"
@@ -85,7 +87,11 @@ constexpr HelpTopic kTopics[] = {
      "Except for the linear equation, the program finds the parameters by non-linear least squares. "
      "The default method is the Marquardt-Levenberg algorithm, which converges quickly under a wide "
      "variety of conditions. In some cases it may not converge properly, so the Gauss-Newton "
-     "algorithm is also included. Both give best-fit values +/- 1 standard deviation.\n\n"
+     "algorithm is also included. Both give best-fit values \xC2\xB1 1 standard deviation.\n\n"
+     "The Results tab rounds each value to the precision its standard deviation supports, for example "
+     "Km = 2.71 \xC2\xB1 0.14. Hold the mouse over a value to see all its digits; Copy report and the "
+     "written reports keep them too. If you change the data or the settings after a fit, the results "
+     "are greyed out until you fit again.\n\n"
      "Gauss-Newton may report 'Local minimum found', meaning that no step could reduce the sum of "
      "squares further within the tolerances; this is not critical but better initial estimates may "
      "give a better fit. 'Maximum of 30 iterations' means no solution was found within 30 iterations, "
@@ -93,14 +99,15 @@ constexpr HelpTopic kTopics[] = {
      "The fit needs initial estimates of the parameters. Normally the program calculates them from "
      "the data. If those are too far from the answer you can enter your own (see Changing the "
      "minimization type and initial estimates).\n\n"
-     "A good fit is one where each standard deviation is less than about 10% of the parameter value. "
+     "A good fit is one where each standard deviation is less than about 10% of the parameter value "
+     "(the Relative SD column). "
      "The program also tests the Hill coefficient against 1.0 with Student's t-test, reports the range "
      "of the data relative to Km, Ka or I50 so that you can judge whether the range was wide enough "
      "(a good rule of thumb is 0.2 Km to 5 Km), and gives the fold activation for the activator "
      "equations. For linear regression it tests the slope against 0 and against 1 and the intercept "
      "against 0.\n\n"
-     "You need more data points than parameters + 1; the program warns you otherwise. If you go on, "
-     "you are (in the final analysis) making up a curve."},
+     "You need more data points than parameters + 1; the program warns you otherwise. If you choose "
+     "Fit anyway, the data cannot pin the curve down and the fitted values mean little."},
 
     {"Plotting your data",
      "The Graph tab plots the data and the fitted curve. Choose a plot type from the list. The NORMAL "
@@ -116,8 +123,8 @@ constexpr HelpTopic kTopics[] = {
      "example to -1/Km on a Lineweaver-Burk plot). Points are numbered as in the data and residual "
      "tables. Drag to pan, scroll to zoom, double-click or 'Reset view' to fit the axes, and "
      "right-click for more options.\n\n"
-     "The RESIDUAL plot is a graph of v - vhat (vhat is the velocity calculated from the fitted "
-     "parameters) against vhat. It shows how well the data fit the equation: a good scatter on both "
+     "The RESIDUAL plot is a graph of the residual (v minus the fitted v, the velocity calculated from "
+     "the best-fit parameters) against the fitted v. It shows how well the data fit the equation: a good scatter on both "
      "sides of the axis with no pattern indicates a good fit. If the residuals follow a pattern "
      "(bell shape, inverted bell, ...) another equation may fit better. In general at least 30 points "
      "are needed to justify these tests, but in practice a good scatter can be seen with 8-10 points. "
@@ -137,7 +144,8 @@ constexpr HelpTopic kTopics[] = {
 
     {"Using your data as a standard curve",
      "The fitted curve can be used as a standard curve. Enter your data, choose an equation, fit, "
-     "then open the Standard curve tab (Calculate > New X value, Alt+X, or New Y value, Alt+Y).\n\n"
+     "then open the Standard curve tab (Calculate > Find [S] for a given v, Alt+X, or Find v for a "
+     "given [S], Alt+Y; the names follow the equation's columns).\n\n"
      "New Y values are calculated from the best-fit parameters and the X ([S], [A] or [I]) you enter. "
      "For new X values the equation is inverted and X is calculated the same way. Both are idealised "
      "values read from the fitted curve. A warning is shown when the value is outside the range of "
@@ -190,7 +198,9 @@ constexpr HelpTopic kTopics[] = {
      "its own residual standard deviation.\n"
      "- Calculations use double precision, and all memory handling is automatic.\n\n"
      "New in this version: any parameter can be fixed, bounds are editable, the iteration history "
-     "is shown, data tables can be saved and pasted, and reports go to text files instead of LPT1."},
+     "is shown, data tables can be saved and pasted, and reports go to text files instead of LPT1. "
+     "View > Text size (Ctrl+= and Ctrl+-) makes the text larger or smaller, and View > Theme chooses "
+     "a light or dark theme; by default it follows the system."},
 };
 
 }  // namespace

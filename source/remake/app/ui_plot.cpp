@@ -21,8 +21,9 @@ void App::draw_graph_tab() {
     const auto m = a.model();
     const auto plots = kin::available_plots(m);
 
+    field_label("Plot type");
     ImGui::SetNextItemWidth(ImGui::GetFontSize() * 22.0f);
-    if (ImGui::BeginCombo("Plot", kin::plot_name(plotType_, m).c_str(), ImGuiComboFlags_HeightLarge)) {
+    if (ImGui::BeginCombo("##plottype", kin::plot_name(plotType_, m).c_str(), ImGuiComboFlags_HeightLarge)) {
         for (auto t : plots)
             if (ImGui::Selectable(kin::plot_name(t, m).c_str(), t == plotType_) && t != plotType_) set_plot_type(t);
         ImGui::EndCombo();
@@ -30,19 +31,40 @@ void App::draw_graph_tab() {
     ImGui::SameLine();
     if (ImGui::Button("Reset view")) refitPlot_ = true;
 
+    // The check boxes share a line while they fit (large text wraps them).
+    const float right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+    auto next_checkbox = [&](const char* label) {
+        const ImGuiStyle& st = ImGui::GetStyle();
+        const float w = ImGui::GetFrameHeight() + st.ItemInnerSpacing.x + ImGui::CalcTextSize(label).x;
+        ImGui::SameLine();
+        if (ImGui::GetCursorScreenPos().x + w > right) ImGui::NewLine();
+    };
     const bool residual = plotType_ == kin::PlotType::Residual;
     bool changed = ImGui::Checkbox("Include origin", &plotOptions_.includeOrigin);
     if (!residual) {
-        ImGui::SameLine();
+        next_checkbox("Extend curve to Y axis");
         changed |= ImGui::Checkbox("Extend curve to Y axis", &plotOptions_.extendToYAxis);
-        ImGui::SameLine();
+        next_checkbox("Extend curve to X intercept");
         changed |= ImGui::Checkbox("Extend curve to X intercept", &plotOptions_.extendToXIntercept);
     }
-    ImGui::SameLine();
+    next_checkbox("Number the points");
     ImGui::Checkbox("Number the points", &numberPoints_);
     if (changed) refitPlot_ = true;
 
     const auto pd = kin::make_plot(a, plotType_, plotOptions_);
+
+    // ImPlot ignores ImGui's global alpha, so out-of-date results are greyed
+    // out here by fading the plot's own colours.
+    const float fade = results_stale() ? kStaleAlpha : 1.0f;
+    auto faded = [fade](ImVec4 c) { return ImVec4(c.x, c.y, c.z, c.w * fade); };
+    int pushed = 0;
+    if (fade < 1.0f) {
+        for (ImPlotCol col : {ImPlotCol_AxisText, ImPlotCol_AxisGrid, ImPlotCol_AxisTick, ImPlotCol_LegendText,
+                              ImPlotCol_PlotBorder, ImPlotCol_InlayText}) {
+            ImPlot::PushStyleColor(col, faded(ImPlot::GetStyle().Colors[col]));
+            ++pushed;
+        }
+    }
 
     if (ImPlot::BeginPlot("##graph", ImGui::GetContentRegionAvail(), ImPlotFlags_NoTitle)) {
         ImPlot::SetupAxes(pd.xLabel.c_str(), pd.yLabel.c_str());
@@ -56,7 +78,7 @@ void App::draw_graph_tab() {
         {
             ImPlotSpec axis;
             const ImVec4 dim = palette().textDim;
-            axis.LineColor = ImVec4(dim.x, dim.y, dim.z, 0.6f);
+            axis.LineColor = ImVec4(dim.x, dim.y, dim.z, 0.6f * fade);
             axis.Flags = ImPlotItemFlags_NoLegend | ImPlotItemFlags_NoFit;
             const double zero = 0.0;
             ImPlot::PlotInfLines("##x0", &zero, 1, axis);
@@ -66,7 +88,7 @@ void App::draw_graph_tab() {
 
         if (!pd.cx.empty()) {
             ImPlotSpec curve;
-            curve.LineColor = palette().accent;
+            curve.LineColor = faded(palette().accent);
             curve.LineWeight = 2.0f;
             ImPlot::PlotLine("Fitted curve", pd.cx.data(), pd.cy.data(), static_cast<int>(pd.cx.size()), curve);
         }
@@ -74,13 +96,13 @@ void App::draw_graph_tab() {
         ImPlotSpec pts;
         pts.Marker = ImPlotMarker_Circle;
         pts.MarkerSize = 4.5f;
-        pts.LineColor = palette().text;
-        pts.MarkerFillColor = palette().text;
+        pts.LineColor = faded(palette().text);
+        pts.MarkerFillColor = faded(palette().text);
         ImPlot::PlotScatter("Data", pd.px.data(), pd.py.data(), static_cast<int>(pd.px.size()), pts);
 
         if (numberPoints_) {
             ImPlotSpec label;
-            label.LineColor = palette().textDim;
+            label.LineColor = faded(palette().textDim);
             for (size_t i = 0; i < pd.px.size(); ++i) {
                 if (!std::isfinite(pd.px[i]) || !std::isfinite(pd.py[i])) continue;
                 char buf[16];
@@ -91,11 +113,12 @@ void App::draw_graph_tab() {
 
         const bool meaningful = plotType_ != kin::PlotType::Normal || m == kin::ModelId::Linear;
         if (!residual && meaningful && plotOptions_.extendToXIntercept && pd.xIntercept) {
-            ImPlot::Annotation(*pd.xIntercept, 0.0, palette().accent, ImVec2(0, 18), true,
+            ImPlot::Annotation(*pd.xIntercept, 0.0, faded(palette().accent), ImVec2(0, 18), true,
                                "X = %s", kin::fmt_g(*pd.xIntercept, 4).c_str());
         }
         ImPlot::EndPlot();
     }
+    ImPlot::PopStyleColor(pushed);
 }
 
 }  // namespace app

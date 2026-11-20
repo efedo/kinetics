@@ -36,9 +36,10 @@ void App::draw_file_runs_tab() {
         item_tooltip("Version 3.51 skipped every negative value. Turn this off to analyse negative log10(v) or Y "
                      "values; only exactly -1 is then treated as missing.");
 
+        field_label("Run");
         ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.0f);
         const std::string preview = "Run #" + std::to_string(import_.selectedRun);
-        if (ImGui::BeginCombo("Run", preview.c_str())) {
+        if (ImGui::BeginCombo("##run", preview.c_str())) {
             for (const auto& r : f.runs) {
                 const auto n = f.points(r, import_.negativeIsMissing).size();
                 const std::string label = "Run #" + std::to_string(r.number) + "  (" + std::to_string(n) + " points)";
@@ -47,26 +48,32 @@ void App::draw_file_runs_tab() {
             ImGui::EndCombo();
         }
     } else {
+        field_label("Velocities per dataset");
         ImGui::SetNextItemWidth(ImGui::GetFontSize() * 7.0f);
-        if (ImGui::InputInt("Velocities per dataset", &import_.mpaCount)) import_.mpaCount = std::clamp(import_.mpaCount, 1, 10000);
+        if (ImGui::InputInt("##mpacount", &import_.mpaCount)) import_.mpaCount = std::clamp(import_.mpaCount, 1, 10000);
         const int count = kin::mpa_dataset_count(import_.mpaText, import_.mpaCount);
+        field_label("Dataset");
         ImGui::SetNextItemWidth(ImGui::GetFontSize() * 7.0f);
-        if (ImGui::InputInt("Dataset #", &import_.selectedRun)) import_.selectedRun = std::max(1, import_.selectedRun);
+        if (ImGui::InputInt("##dataset", &import_.selectedRun)) import_.selectedRun = std::max(1, import_.selectedRun);
         item_tooltip(std::to_string(count) + " complete dataset" + (count == 1 ? "" : "s") +
                      " in the file. MPA files hold velocities only: the X column of the data table supplies the "
                      "concentrations for every dataset.");
     }
-    if (ImGui::Button("Load into table (Alt+M)")) load_selected_run_into_table();
+    if (ImGui::Button("Load into table")) load_selected_run_into_table();
+    ImGui::SetItemTooltip("Copy this run's points into the data table, to edit or fit them (Alt+M)");
     ImGui::SameLine();
-    if (ImGui::Button("Fit this run (Alt+S)")) fit_selected_run();
+    if (ImGui::Button("Fit this run")) fit_selected_run();
+    ImGui::SetItemTooltip("Load this run into the data table and fit it (Alt+S)");
 
-    ImGui::SeparatorText("All runs (Alt+A)");
+    ImGui::SeparatorText("All runs");
+    field_label(sheet ? "Starting run" : "Starting dataset");
     ImGui::SetNextItemWidth(ImGui::GetFontSize() * 7.0f);
-    ImGui::InputInt(sheet ? "Starting run #" : "Starting dataset #", &batch_.firstRun);
+    ImGui::InputInt("##firstrun", &batch_.firstRun);
     ImGui::Checkbox("Write a report for each run", &batch_.writeReports);
     if (report_.file.empty()) item_tooltip("You will be asked for a report file.");
     else item_tooltip(report_.file.filename().string() + ", " + kin::report_format_name(report_.options.format) + " format");
     if (ImGui::Button("Analyse all runs")) analyse_all_runs();
+    ImGui::SetItemTooltip("Fit every run from the starting one to the end of the file (Alt+A)");
     if (!batch_.status.empty()) {
         ImGui::SameLine();
         ImGui::TextWrapped("%s", batch_.status.c_str());
@@ -104,7 +111,7 @@ void App::draw_file_runs_tab() {
         ImGui::TableSetupColumn("Run");
         ImGui::TableSetupColumn("Status");
         for (const auto& nm : names) ImGui::TableSetupColumn(nm.c_str());
-        ImGui::TableSetupColumn("Std. dev.");
+        ImGui::TableSetupColumn("Residual SD");
         ImGui::TableHeadersRow();
         for (int i = 0; i < n; ++i) {
             const auto& it = batch_.items[static_cast<size_t>(i)];
@@ -126,10 +133,11 @@ void App::draw_file_runs_tab() {
             if (!ok) ImGui::SetItemTooltip("%s", a.fit.message.c_str());
             for (size_t j = 0; j < names.size(); ++j) {
                 ImGui::TableNextColumn();
-                ImGui::Text("%s +/- %s", kin::fmt_g(a.fit.p[j], 5).c_str(), kin::fmt_g(a.fit.sd[j], 3).c_str());
+                ImGui::TextUnformatted(format_value_pm(a.fit.p[j], a.fit.sd[j]).c_str());
+                ImGui::SetItemTooltip("%s \xC2\xB1 %s", kin::fmt_g(a.fit.p[j]).c_str(), kin::fmt_g(a.fit.sd[j]).c_str());
             }
             ImGui::TableNextColumn();
-            ImGui::TextUnformatted(kin::fmt_g(a.fit.stdDev, 4).c_str());
+            ImGui::TextUnformatted(kin::fmt_g(a.fit.stdDev, 3).c_str());
         }
         ImGui::EndTable();
     }

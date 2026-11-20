@@ -67,16 +67,16 @@ void App::draw_dialogs() {
         const auto n = kin::clean_data(table_points()).size();
         const int k = kin::free_param_count(model_, params_);
         ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);
-        ImGui::Text("You have %zu data points and %d free parameters.", n, k);
-        ImGui::TextWrapped("You can't fit a curve with as many parameters as points (or nearly as many): "
-                           "you need #points > #parameters + 1. Otherwise you are, in the final analysis, "
-                           "making up a curve.");
+        ImGui::Text("You have %zu data point%s and %d parameters to fit.", n, n == 1 ? "" : "s", k);
+        ImGui::TextWrapped("A reliable fit needs more points than parameters + 1: at least %d points here. With "
+                           "fewer, the data cannot pin the curve down, so the fitted values mean little.",
+                           k + 2);
         ImGui::PopTextWrapPos();
         ImGui::Spacing();
-        if (ImGui::Button("Get out of this mess")) ImGui::CloseCurrentPopup();
+        if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
         ImGui::SetItemDefaultFocus();
         ImGui::SameLine();
-        if (ImGui::Button("Continue with the fit (no guarantees)")) {
+        if (ImGui::Button("Fit anyway")) {
             ImGui::CloseCurrentPopup();
             if (n >= static_cast<size_t>(k)) fit_now();
             else error(std::to_string(n) + " data points cannot determine " + std::to_string(k) + " parameters.");
@@ -111,29 +111,32 @@ void App::draw_report_options_dialog() {
     ImGui::EndDisabled();
 
     ImGui::Spacing();
-    ImGui::SetNextItemWidth(w);
-    ImGui::InputText("Header (experiment type)", &o.header);
-    ImGui::SetItemTooltip("If blank, the report has a line to fill in by hand.");
-    ImGui::SetNextItemWidth(w);
-    ImGui::InputText("Date of experiment", &o.experimentDate);
-    ImGui::SetItemTooltip("If blank, the report has a line to fill in by hand.");
-
-    ImGui::Spacing();
     int num = static_cast<int>(o.numbering);
-    ImGui::TextUnformatted("Numbering:");
-    ImGui::SameLine();
-    ImGui::RadioButton("Off", &num, 0);
-    ImGui::SameLine();
-    ImGui::RadioButton("Sequential", &num, 1);
-    ImGui::SameLine();
-    ImGui::RadioButton("Use file run #", &num, 2);
-    o.numbering = static_cast<kin::Numbering>(num);
-    ImGui::BeginDisabled(o.numbering != kin::Numbering::Sequential);
-    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 7.0f);
-    if (ImGui::InputInt("Starting # for numbering", &o.startNumber)) report_.nextNumber = o.startNumber;
-    ImGui::SameLine();
-    ImGui::TextDisabled("(next: %d)", report_.nextNumber);
-    ImGui::EndDisabled();
+    if (ImGui::BeginTable("##form", 2, ImGuiTableFlags_SizingFixedFit)) {
+        ImGui::TableSetupColumn("label");
+        ImGui::TableSetupColumn("field", ImGuiTableColumnFlags_WidthFixed, w);
+        form_row("Experiment type");
+        ImGui::InputText("##header", &o.header);
+        ImGui::SetItemTooltip("The report's heading. If blank, the report has a line to fill in by hand.");
+        form_row("Date of experiment");
+        ImGui::InputText("##date", &o.experimentDate);
+        ImGui::SetItemTooltip("If blank, the report has a line to fill in by hand.");
+        form_row("Numbering");
+        ImGui::RadioButton("Off", &num, 0);
+        ImGui::SameLine();
+        ImGui::RadioButton("Sequential", &num, 1);
+        ImGui::SameLine();
+        ImGui::RadioButton("File run number", &num, 2);
+        o.numbering = static_cast<kin::Numbering>(num);
+        ImGui::BeginDisabled(o.numbering != kin::Numbering::Sequential);
+        form_row("Start numbering at");
+        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 7.0f);
+        if (ImGui::InputInt("##start", &o.startNumber)) report_.nextNumber = o.startNumber;
+        ImGui::SameLine();
+        ImGui::TextDisabled("(next: %d)", report_.nextNumber);
+        ImGui::EndDisabled();
+        ImGui::EndTable();
+    }
 
     ImGui::SeparatorText("Destination");
     if (report_.file.empty()) ImGui::TextDisabled("No report file chosen.");
@@ -172,8 +175,8 @@ void App::draw_report_options_dialog() {
 void App::draw_about_dialog() {
     center_next_window();
     if (!ImGui::BeginPopupModal("About Kinetics##modal", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
-    ImGui::TextUnformatted("SB'S KINETICS PROGRAM");
-    ImGui::Text("Version %s, a port of version 3.51 to modern C++", KINETICS_VERSION);
+    ImGui::TextUnformatted("Kinetics");
+    ImGui::Text("Version %s, a port of SB's Kinetics Program 3.51 to modern C++", KINETICS_VERSION);
     ImGui::TextUnformatted("BioTechniques 13:906-911 (1992)");
     ImGui::Spacing();
     ImGui::TextDisabled("Built with SDL %d.%d.%d, Dear ImGui %s and ImPlot %s.", SDL_MAJOR_VERSION,

@@ -143,24 +143,23 @@ void App::draw_fit_button() {
     // While a run from the file analysis is shown, the table's state does not
     // apply to the results.
     const bool showingRun = batch_.selected >= 0 && analysisRun_.has_value();
-    const bool stale = analysis_ && stale_ && !showingRun;
 
     ImGui::Spacing();
     ImGui::BeginDisabled(!haveData);
-    if (primary_button(stale ? "Fit again  (F5)" : "Fit  (F5)", ImVec2(-FLT_MIN, ImGui::GetFrameHeight() * 1.5f)))
+    if (primary_button(results_stale() ? "Fit again" : "Fit", ImVec2(-FLT_MIN, ImGui::GetFrameHeight() * 1.5f)))
         request_fit();
     ImGui::EndDisabled();
     if (!haveData)
         item_tooltip("Enter data first: type or paste " + std::string(def.xName) + " and " + std::string(def.yName) +
                      " values in the table above.");
     else
-        ImGui::SetItemTooltip("Fit the equation to the data in the table");
+        ImGui::SetItemTooltip(results_stale() ? "The data or settings have changed: fit again to update the results (F5)"
+                                              : "Fit the equation to the data in the table (F5)");
 
-    // Say something only when the results need attention.
-    if (!analysis_ || showingRun) return;
-    if (stale)
-        warning_text("The data or settings have changed since the last fit.", "");
-    else if (!analysis_->linear && analysis_->fit.status != kin::FitStatus::Converged)
+    // Out-of-date results are flagged on the right; here, only a fit that
+    // did not converge needs a word.
+    if (!analysis_ || showingRun || stale_) return;
+    if (!analysis_->linear && analysis_->fit.status != kin::FitStatus::Converged)
         warning_text("The last fit did not converge: see the Results tab.", analysis_->fit.message);
 }
 
@@ -187,42 +186,41 @@ void App::draw_fit_settings() {
     const bool linear = kin::model_def(model_).family == kin::Family::Linear;
     ImGui::BeginGroup();
     ImGui::BeginDisabled(linear);
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted("Method:");
-    ImGui::SameLine();
-    if (ImGui::RadioButton("Marquardt-Levenberg", method_ == kin::Method::Marquardt)) {
-        method_ = kin::Method::Marquardt;
-        mark_stale();
-    }
-    ImGui::SameLine();
-    if (ImGui::RadioButton("Gauss-Newton", method_ == kin::Method::GaussNewton)) {
-        method_ = kin::Method::GaussNewton;
-        mark_stale();
-    }
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted("Initial estimates:");
-    ImGui::SameLine();
-    if (ImGui::RadioButton("Automatic", guess_ == kin::GuessMode::Automatic)) {
-        guess_ = kin::GuessMode::Automatic;
-        mark_stale();
-    }
-    ImGui::SameLine();
-    if (ImGui::RadioButton("Manual", guess_ == kin::GuessMode::Manual)) {
-        guess_ = kin::GuessMode::Manual;
-        mark_stale();
-    }
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted("Max. iterations:");
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 7.0f);
-    if (ImGui::InputInt("##maxit", &maxIterations_, 10, 50)) {
-        maxIterations_ = std::clamp(maxIterations_, 0, 100000);
-        mark_stale();
-    }
-    if (!linear) ImGui::SetItemTooltip(method_ == kin::Method::Marquardt ? "0 = default (200)" : "0 = default (30)");
-    if (!linear && maxIterations_ == 0) {
+    if (ImGui::BeginTable("##fitform", 2, ImGuiTableFlags_SizingFixedFit)) {
+        ImGui::TableSetupColumn("label");
+        ImGui::TableSetupColumn("field", ImGuiTableColumnFlags_WidthStretch);
+        form_row("Method");
+        if (ImGui::RadioButton("Marquardt-Levenberg", method_ == kin::Method::Marquardt)) {
+            method_ = kin::Method::Marquardt;
+            mark_stale();
+        }
         ImGui::SameLine();
-        ImGui::TextDisabled("(default: %d)", method_ == kin::Method::Marquardt ? 200 : 30);
+        if (ImGui::RadioButton("Gauss-Newton", method_ == kin::Method::GaussNewton)) {
+            method_ = kin::Method::GaussNewton;
+            mark_stale();
+        }
+        form_row("Initial estimates");
+        if (ImGui::RadioButton("Automatic", guess_ == kin::GuessMode::Automatic)) {
+            guess_ = kin::GuessMode::Automatic;
+            mark_stale();
+        }
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Manual", guess_ == kin::GuessMode::Manual)) {
+            guess_ = kin::GuessMode::Manual;
+            mark_stale();
+        }
+        form_row("Iteration limit");
+        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 7.0f);
+        if (ImGui::InputInt("##maxit", &maxIterations_, 10, 50)) {
+            maxIterations_ = std::clamp(maxIterations_, 0, 100000);
+            mark_stale();
+        }
+        if (!linear) ImGui::SetItemTooltip(method_ == kin::Method::Marquardt ? "0 = default (200)" : "0 = default (30)");
+        if (!linear && maxIterations_ == 0) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("(default: %d)", method_ == kin::Method::Marquardt ? 200 : 30);
+        }
+        ImGui::EndTable();
     }
     ImGui::EndDisabled();
     ImGui::EndGroup();
@@ -245,6 +243,15 @@ void App::draw_data_table() {
     }
 
     if (rows_.empty() || !rows_.back().x.empty() || !rows_.back().y.empty()) rows_.push_back({});
+
+    // After Fit (F5) with nothing to fit, say what to do here instead of in
+    // an error box; the note goes once there are data.
+    if (showEmptyHint_ && !kin::clean_data(table_points()).empty()) showEmptyHint_ = false;
+    if (showEmptyHint_)
+        warning_text(("Enter data first: type or paste " + std::string(def.xName) + " and " + std::string(def.yName) +
+                      " values in the table, then press Fit.")
+                         .c_str(),
+                     "");
 
     int insertAt = -1, deleteAt = -1;
     const ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInner | ImGuiTableFlags_ScrollY |

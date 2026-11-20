@@ -13,7 +13,8 @@
 //   --tab <name>              results | graph | residuals | standard | runs | report
 //   --plot <1..10>            plot type (v3.51 numbering)
 //   --show <name>             help | about | report-options | fit-options
-//   --theme <name>            dark (default) | light | system
+//   --theme <name>            system (default) | dark | light
+//   --text-size <percent>     text size, 80 to 150 (default 100)
 //   --classic                 start in the classic (v3.51) interface
 //   --classic-keys <keys>     start in the classic interface and type these keys,
 //                             e.g. "alt+t,a,enter" (see classic::Host::inject_keys)
@@ -33,6 +34,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "app/app.hpp"
 #include "app/platform.hpp"
@@ -52,6 +54,7 @@ struct Options {
     bool classic = false;
     char model = 0;
     int plot = 0;
+    int textSize = 0;
     bool fit = false;
     bool analyseAll = false;
     int width = 1400;
@@ -77,6 +80,7 @@ Options parse_args(int argc, char** argv) {
         else if (a == "--plot") o.plot = std::atoi(next().c_str());
         else if (a == "--screenshot") o.screenshot = next();
         else if (a == "--theme") o.theme = next();
+        else if (a == "--text-size") o.textSize = std::atoi(next().c_str());
         else if (a == "--classic") o.classic = true;
         else if (a == "--classic-keys") o.classicKeys = next();
         else if (a == "--size") {
@@ -275,6 +279,28 @@ EM_JS(void, js_install_save_hooks, (), {
 });
 #endif
 
+// Earlier versions kept their preferences in an "SB" folder
+// (%APPDATA%\SB\Kinetics on Windows). Move those files into prefDir once,
+// keeping any that prefDir already has, and remove the old folders if empty.
+void move_old_preferences(const std::filesystem::path& prefDir) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    fs::path dir = prefDir;
+    if (!dir.has_filename()) dir = dir.parent_path();  // SDL ends it with a separator
+    const fs::path oldOrg = dir.parent_path() / "SB";
+    const fs::path oldDir = oldOrg / "Kinetics";
+    if (!fs::is_directory(oldDir, ec)) return;
+    std::vector<fs::path> files;
+    for (fs::directory_iterator it(oldDir, ec), end; !ec && it != end; it.increment(ec))
+        if (it->is_regular_file(ec)) files.push_back(it->path());
+    for (const fs::path& f : files) {
+        const fs::path to = dir / f.filename();
+        if (!fs::exists(to, ec)) fs::rename(f, to, ec);
+    }
+    fs::remove(oldDir, ec);  // these fail, as intended, unless the folder is empty
+    fs::remove(oldOrg, ec);
+}
+
 }  // namespace
 
 #ifdef __EMSCRIPTEN__
@@ -305,7 +331,7 @@ int main(int argc, char** argv) {
     // moving the canvas back into the page.
     if (app::kIsWeb) flags |= SDL_WINDOW_FILL_DOCUMENT | SDL_WINDOW_OPENGL;
     else flags |= SDL_WINDOW_HIDDEN;
-    c.window = SDL_CreateWindow("Kinetics - SB's Kinetics Program", static_cast<int>(c.opt.width * scale),
+    c.window = SDL_CreateWindow("Kinetics", static_cast<int>(c.opt.width * scale),
                                 static_cast<int>(c.opt.height * scale), flags);
     if (!c.window) {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Kinetics", SDL_GetError(), nullptr);
@@ -327,9 +353,10 @@ int main(int argc, char** argv) {
     if (app::kIsWeb) {
         prefDir = "/prefs";
         app::restore_persisted_file(prefDir / "kinetics.ini");
-    } else if (char* pref = SDL_GetPrefPath("SB", "Kinetics")) {
+    } else if (char* pref = SDL_GetPrefPath(nullptr, "Kinetics")) {  // %APPDATA%\Kinetics on Windows
         prefDir = app::path_from_utf8(pref);
         SDL_free(pref);
+        move_old_preferences(prefDir);
     }
     std::filesystem::path exeDir;
     if (const char* base = SDL_GetBasePath()) exeDir = app::path_from_utf8(base);
@@ -369,6 +396,7 @@ int main(int argc, char** argv) {
     if (auto t = tab_from_name(o.tab)) c.app.select_tab(*t);
     if (!o.show.empty()) c.app.show_window(o.show);
     if (auto t = app::theme_from_name(o.theme)) app::set_theme(*t);
+    if (o.textSize > 0) c.app.set_text_scale(o.textSize);
     if (o.classic || !o.classicKeys.empty()) {
         enter_classic(c);
         if (!o.classicKeys.empty()) c.classicHost.inject_keys(o.classicKeys);

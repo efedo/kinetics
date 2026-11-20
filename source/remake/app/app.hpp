@@ -3,6 +3,7 @@
 // Edit, Calculate, View, Help) and its Alt-key shortcuts are kept; the
 // screens become panels and tabs of one window.
 
+#include <array>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -67,6 +68,9 @@ public:
     }
     void select_tab(Tab t) { requestedTab_ = t; }
     void set_plot_type(kin::PlotType t);
+    // View > Text size: a percentage of the normal size, clamped to kTextScales.
+    static constexpr std::array<int, 6> kTextScales{80, 90, 100, 115, 130, 150};
+    void set_text_scale(int percent);
     void save_settings() const;
     // True once after View > Classic interface was chosen.
     bool take_classic_request() { return std::exchange(classicRequested_, false); }
@@ -103,6 +107,12 @@ private:
     std::string fit_settings_summary() const;
     // v0 is fixed and the table has a point at zero concentration: that velocity is used.
     bool v0_measured() const;
+    // The results shown were fitted to data or settings that have changed since.
+    bool results_stale() const;
+    // Forget the imported file (the File runs tab's close button).
+    void close_import();
+    std::string report_file_tooltip() const;
+    void step_text_scale(int direction);
     void load_settings();
     std::string default_dir() const;
     kin::AnalysisRequest make_request(std::vector<kin::Point> data) const;
@@ -144,6 +154,8 @@ private:
     bool showBounds_ = false;
     bool openFitOptions_ = false;     // expand "Fitting options" on the next frame
     float leftFooterHeight_ = 0.0f;   // Fit button and options, below the data table (last frame)
+    bool showEmptyHint_ = false;      // Fit was asked for with an empty table
+    int textScale_ = 100;             // View > Text size, in percent
 
     std::vector<DataRow> rows_;
     std::string dataSource_ = "Entered by hand";
@@ -186,5 +198,10 @@ private:
 
 // The classic interface's view of this App's session (classic_session.cpp).
 std::unique_ptr<classic::Session> make_classic_session(App& app);
+
+// The equation's name for the screen, with any fixed parameters:
+// "Michaelis-Menten equation (Vmax fixed)". Reports keep v3.51's
+// kin::model_description().
+std::string plain_model_label(kin::ModelId model, const std::vector<kin::ParamSetting>& params);
 
 }  // namespace app

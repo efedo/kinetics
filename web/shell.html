@@ -10,12 +10,11 @@
                font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
   #status { position: fixed; inset: 0; display: flex; flex-direction: column; gap: 0.5rem;
             align-items: center; justify-content: center; text-align: center; padding: 1rem; }
-  #status small { color: #8a909c; }
   canvas { display: block; outline: none; }
 </style>
 </head>
 <body>
-<div id="status"><span id="status-text">Loading Kinetics&hellip;</span><small>SB's Kinetics Program, WebAssembly build</small></div>
+<div id="status"><span id="status-text">Loading Kinetics&hellip;</span></div>
 <canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
 <script>
   var statusText = document.getElementById('status-text');
