@@ -1,0 +1,4 @@
+# New code: normalise line endings.
+* text=auto
+
+*.png binary

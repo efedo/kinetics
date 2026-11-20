@@ -1,0 +1,10 @@
+out/
+build/
+.vs/
+*.user
+imgui.ini
+
+# Coverage output (tools/coverage.py writes these to a temporary folder)
+*.gcov
+*.gcda
+*.gcno

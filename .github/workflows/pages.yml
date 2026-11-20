@@ -1,0 +1,72 @@
+# Builds the WebAssembly version, runs the core tests under Node.js, and
+# publishes the page to GitHub Pages (https://efedo.github.io/kinetics/).
+# In a private repository (the archive) it only builds and tests.
+#
+# One-time setup: Settings > Pages > Build and deployment > Source:
+# "GitHub Actions".
+
+name: Web build and GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let a running deployment finish; queue the next one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  EMSDK_VERSION: 6.0.13  # the version the project is built and tested with
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Install the Emscripten SDK
+        run: |
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$HOME/emsdk"
+          "$HOME/emsdk/emsdk" install "$EMSDK_VERSION"
+          "$HOME/emsdk/emsdk" activate "$EMSDK_VERSION"
+
+      - name: Build and test
+        run: |
+          source "$HOME/emsdk/emsdk_env.sh"
+          cmake --preset wasm-release
+          cmake --build --preset wasm-release
+          ctest --preset wasm-release
+
+      - name: Collect the page
+        run: |
+          mkdir _site
+          cp out/build/wasm-release/index.html out/build/wasm-release/index.js out/build/wasm-release/index.wasm _site/
+
+      - uses: actions/configure-pages@v5
+        if: ${{ !github.event.repository.private }}
+
+      - uses: actions/upload-pages-artifact@v3
+        if: ${{ !github.event.repository.private }}
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    if: ${{ !github.event.repository.private }}
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

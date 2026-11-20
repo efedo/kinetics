@@ -1,0 +1,65 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/${presetName}"
+    },
+    {
+      "name": "x64-debug",
+      "displayName": "x64 Debug",
+      "inherits": "base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "x64-release",
+      "displayName": "x64 Release",
+      "inherits": "base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "core-only",
+      "displayName": "Core library and tests only (no SDL/ImGui)",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "KINETICS_BUILD_APP": "OFF"
+      }
+    },
+    {
+      "name": "wasm-release",
+      "displayName": "WebAssembly (Emscripten) Release",
+      "description": "Needs the Emscripten SDK environment (emsdk_env) so that EMSDK is set.",
+      "inherits": "base",
+      "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "wasm-coverage",
+      "displayName": "Core test coverage (Emscripten, gcov format)",
+      "description": "Core library and tests only, instrumented for coverage. Run tools/coverage.py afterwards.",
+      "inherits": "wasm-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "KINETICS_BUILD_APP": "OFF",
+        "KINETICS_COVERAGE": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "x64-debug",    "configurePreset": "x64-debug" },
+    { "name": "x64-release",  "configurePreset": "x64-release" },
+    { "name": "core-only",    "configurePreset": "core-only" },
+    { "name": "wasm-release", "configurePreset": "wasm-release" },
+    { "name": "wasm-coverage", "configurePreset": "wasm-coverage" }
+  ],
+  "testPresets": [
+    { "name": "x64-debug",    "configurePreset": "x64-debug",    "output": { "outputOnFailure": true } },
+    { "name": "x64-release",  "configurePreset": "x64-release",  "output": { "outputOnFailure": true } },
+    { "name": "core-only",    "configurePreset": "core-only",    "output": { "outputOnFailure": true } },
+    { "name": "wasm-release", "configurePreset": "wasm-release", "output": { "outputOnFailure": true } },
+    { "name": "wasm-coverage", "configurePreset": "wasm-coverage", "output": { "outputOnFailure": true } }
+  ]
+}

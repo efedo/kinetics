@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kinetics</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #1e1f22; color: #dcdde0;
+               font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  #status { position: fixed; inset: 0; display: flex; flex-direction: column; gap: 0.5rem;
+            align-items: center; justify-content: center; text-align: center; padding: 1rem; }
+  #status small { color: #8a909c; }
+  canvas { display: block; outline: none; }
+</style>
+</head>
+<body>
+<div id="status"><span id="status-text">Loading Kinetics&hellip;</span><small>SB's Kinetics Program, WebAssembly build</small></div>
+<canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
+<script>
+  var statusText = document.getElementById('status-text');
+  // URL parameters become command-line options, e.g.
+  //   index.html?model=a&open=/examples/michaelis_menten.csv&fit&tab=graph&plot=2
+  var args = [];
+  new URLSearchParams(location.search).forEach(function (value, key) {
+    args.push('--' + key);
+    if (value !== '') args.push(value);
+  });
+  var Module = {
+    arguments: args,
+    canvas: document.getElementById('canvas'),
+    setStatus: function (text) { if (text) statusText.textContent = text; },
+    onRuntimeInitialized: function () {
+      document.getElementById('status').style.display = 'none';
+      Module.canvas.focus();
+    },
+    print: function (t) { console.log(t); },
+    printErr: function (t) { console.error(t); },
+  };
+  window.addEventListener('error', function () {
+    statusText.textContent = 'Kinetics could not start; see the browser console for details.';
+  });
+</script>
+{{{ SCRIPT }}}
+</body>
+</html>
