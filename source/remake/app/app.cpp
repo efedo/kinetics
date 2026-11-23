@@ -25,8 +25,8 @@ void App::init(const std::filesystem::path& prefDir, const std::filesystem::path
     const auto model = model_;
     set_model(model);
     stale_ = batchStale_ = false;
-    // Show the options folded only when they hold nothing unusual.
-    openFitOptions_ = !fit_settings_are_default();
+    // Show the fit settings folded only when they hold nothing unusual.
+    fitOpen_ = !fit_settings_are_default();
 }
 
 void App::shutdown() { save_settings(); }
@@ -104,7 +104,7 @@ void App::show_window(const std::string& name) {
     if (name == "help") showHelp_ = true;
     else if (name == "about") openAbout_ = true;
     else if (name == "report-options") openReportOptions_ = true;
-    else if (name == "fit-options") openFitOptions_ = true;
+    else if (name == "fit-options") fitOpen_ = true;
     else if (name == "graph") {
         requestedTab_ = Tab::Results;
         scrollToPlot_ = true;
@@ -203,31 +203,6 @@ bool App::fit_settings_are_default() const {
     for (size_t j = 0; j < params_.size() && j < defaults.size(); ++j)
         if (params_[j].fixed || params_[j].min != defaults[j].min || params_[j].max != defaults[j].max) return false;
     return true;
-}
-
-std::string App::fit_settings_summary() const {
-    const auto& def = kin::model_def(model_);
-    const bool linear = def.family == kin::Family::Linear;
-    const auto defaults = kin::default_param_settings(model_);
-    const auto iv0 = kin::param_index(model_, kin::Role::V0);
-    std::string fixed;
-    bool customBounds = false;
-    for (size_t j = 0; j < params_.size() && j < def.params.size(); ++j) {
-        const auto& s = params_[j];
-        if (j < defaults.size() && (s.min != defaults[j].min || s.max != defaults[j].max)) customBounds = true;
-        if (!s.fixed) continue;
-        fixed += fixed.empty() ? "" : ", ";
-        fixed += std::string(def.params[j].name) + " fixed ";
-        fixed += (iv0 && *iv0 == static_cast<int>(j) && v0_measured()) ? "at the measured value"
-                                                                        : "at " + kin::fmt_g(s.value, 4);
-    }
-    std::string s = fixed.empty() ? "All parameters fitted" : fixed;
-    if (linear) return s + "; linear regression, solved directly.";
-    if (customBounds) s += ", custom bounds";
-    s += method_ == kin::Method::GaussNewton ? "; Gauss-Newton" : "; Marquardt-Levenberg";
-    s += guess_ == kin::GuessMode::Manual ? ", manual estimates" : ", automatic estimates";
-    if (maxIterations_ > 0) s += ", at most " + std::to_string(maxIterations_) + " iterations";
-    return s + ".";
 }
 
 std::vector<kin::Point> App::table_points(int* invalidCells) const {
@@ -450,7 +425,7 @@ void App::apply_analysis(kin::AnalysisOutcome outcome, std::optional<int> runNum
     const auto plots = kin::available_plots(analysis_->model());
     if (std::find(plots.begin(), plots.end(), plotType_) == plots.end()) set_plot_type(kin::PlotType::Normal);
     // A fit that did not converge may need other options: show them.
-    if (!analysis_->linear && analysis_->fit.status != kin::FitStatus::Converged) openFitOptions_ = true;
+    if (!analysis_->linear && analysis_->fit.status != kin::FitStatus::Converged) fitOpen_ = true;
 }
 
 // ===========================================================================

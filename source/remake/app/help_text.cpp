@@ -12,8 +12,8 @@ constexpr HelpTopic kTopics[] = {
     {"Getting started",
      "Kinetics fits an equation to your measurements, for example Michaelis-Menten to velocities "
      "measured at several substrate concentrations, and gives each constant with its standard "
-     "deviation. The strip under the menus shows the four steps; the status bar at the bottom says "
-     "what to do next.\n\n"
+     "deviation. The strip under the menus shows the five steps (Data, Equation, Fit, Results, "
+     "Report) and how far you are; click a step to go to it.\n\n"
      "## Try it with the example\n\n"
      "- Choose File > Open example > Michaelis-Menten data table. Ten [S] and v values fill the table on "
      "the left.\n"
@@ -67,7 +67,7 @@ constexpr HelpTopic kTopics[] = {
      "The Arrhenius equation needs base-10 logarithms of the velocities and temperatures in degrees "
      "Celsius; follow the column headings of the data table. Ea is reported in kcal/mol and kJ/mol.\n\n"
      "## Fixed parameters\n\n"
-     "Parameters can be held fixed with the Fixed check box under Fitting options. For example, if you "
+     "Parameters can be held fixed with the Fixed check box in the Fit section. For example, if you "
      "have several measurements at saturating substrate and so know Vmax, you can fix Vmax at that "
      "value. This is a convenience only: your data should span a wide enough range for the program to "
      "find all the parameters, and a fixed value must be accurate. When v0 is fixed and the data "
@@ -141,7 +141,7 @@ constexpr HelpTopic kTopics[] = {
      "variety of conditions. In some cases it may not converge properly, so the Gauss-Newton "
      "algorithm is also included. Both give best-fit values \xC2\xB1 1 standard deviation.\n\n"
      "The fit needs initial estimates of the parameters. Normally the program calculates them from "
-     "the data. If those are too far from the answer you can enter your own (see Fitting options).\n\n"
+     "the data. If those are too far from the answer you can enter your own (see Fit settings).\n\n"
      "## Reading the results\n\n"
      "The Results tab shows, from the top: a verdict on the fit, the constants, the range of the data, "
      "the graph, and folded sections with the residuals and the iteration history. On a wide window "
@@ -223,11 +223,11 @@ constexpr HelpTopic kTopics[] = {
      "values read from the fitted curve. A warning is shown when the value is outside the range of "
      "the data."},
 
-    {"Fitting options",
-     "The Fitting options, folded below the Fit button, hold the settings most fits never need: fixed "
-     "parameters, bounds, the fitting method, the initial estimates and the iteration limit. The line "
-     "under the heading sums them up while they are folded. The Calculate menu has the method and the "
-     "estimates too.\n\n"
+    {"Fit settings",
+     "The Fit section, below Data and Equation, holds the settings most fits never need: fixed "
+     "parameters, bounds, the fitting method, the initial estimates and the iteration limit. They "
+     "start folded unless one differs from the default; click the Fit heading to show them. The Fit "
+     "button stays below them either way. The Calculate menu has the method and the estimates too.\n\n"
      "## Method\n\n"
      "If the program has trouble finding the best-fit values with the default Marquardt-Levenberg "
      "method, try Gauss-Newton, which may converge where Marquardt-Levenberg does not.\n\n"

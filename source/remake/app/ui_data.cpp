@@ -1,10 +1,11 @@
-// Left panel: equation, data table, the Fit button and the fitting options
-// (v3.51 Edit menu: "edit equation Type" and "enter/edit Data").
+// Left panel: the Data, Equation and Fit sections (v3.51 Edit menu: "enter/
+// edit Data" and "edit equation Type").
 //
-// Top to bottom in the order of the work: choose the equation, enter the
-// data, fit. The parameter and minimisation settings, which most fits never
-// need, sit folded below the Fit button. While a run from an imported file
-// is shown, its points take the table's place, read-only.
+// Top to bottom in the order of the steps in the strip above: enter the
+// data, choose the equation, fit. Each section folds. The Fit section holds
+// the parameter and minimisation settings, which most fits never need and
+// so start folded, with the Fit button below them. While a run from an
+// imported file is shown, its points take the table's place, read-only.
 
 #include <imgui.h>
 #include <imgui_stdlib.h>
@@ -104,20 +105,35 @@ void draw_thumbnail(kin::ModelId id, ImVec2 p, ImVec2 size, ImU32 col, ImU32 axe
 const char* equation_name(kin::ModelId id) { return equation_info(id).name; }
 
 void App::draw_left_panel() {
-    section_heading("Equation", true);
-    help_link(HelpId::Equation);
-    draw_model_section();
+    // Alt+D and Alt+T put the cursor in a section, which must be open.
+    if (focusTable_ && !showing_run()) dataOpen_ = true;
+    if (focusModel_) equationOpen_ = true;
     if (showing_run()) draw_run_points();
     else draw_data_table();
     // The table fills the height left over by what follows it, measured here
     // and used on the next frame.
     const float footerTop = ImGui::GetCursorPosY();
-    draw_fit_button();
-    draw_fit_options_section();
+    draw_model_section();
+    draw_fit_section();
     leftFooterHeight_ = ImGui::GetCursorPosY() - footerTop;
 }
 
+void App::section_fold_heading(Section s, const char* title, bool& open, bool first) {
+    const bool asked = gotoSection_ && *gotoSection_ == s;
+    if (asked) {
+        open = true;
+        gotoSection_.reset();
+    }
+    const bool clicked = foldable_heading(title, open, first);
+    // Bring the section into view; the panel scrolls when the window is too
+    // short for everything.
+    if (asked || (clicked && open)) ImGui::SetScrollHereY(0.0f);
+}
+
 void App::draw_model_section() {
+    section_fold_heading(Section::Equation, "Equation", equationOpen_);
+    help_link(HelpId::Equation);
+    if (!equationOpen_) return;
     const auto& def = kin::model_def(model_);
     const float fs = ImGui::GetFontSize();
     // In a short window the formula goes into the list's tooltip.
@@ -269,6 +285,27 @@ void App::draw_parameter_table() {
     }
 }
 
+namespace {
+
+// The Fit button's face: a "play" triangle and the label, centred on the
+// last item (a button without a label of its own).
+void draw_play_face(const char* label) {
+    const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+    const float fs = ImGui::GetFontSize();
+    const ImVec2 ts = ImGui::CalcTextSize(label);
+    const float th = std::round(fs * 0.7f);  // the triangle's height
+    const float tw = std::round(th * 0.87f);  // and width
+    const float gap = std::round(fs * 0.45f);
+    const float x = std::floor((a.x + b.x - (tw + gap + ts.x)) * 0.5f);
+    const float cy = std::floor((a.y + b.y) * 0.5f);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImU32 ink = ImGui::GetColorU32(ImGuiCol_Text);  // dimmed when disabled
+    dl->AddTriangleFilled(ImVec2(x, cy - th * 0.5f), ImVec2(x + tw, cy), ImVec2(x, cy + th * 0.5f), ink);
+    dl->AddText(ImVec2(x + tw + gap, std::floor(cy - ts.y * 0.5f)), ink, label);
+}
+
+}  // namespace
+
 void App::draw_fit_button() {
     const auto& def = kin::model_def(model_);
     const bool runs = showing_run();
@@ -278,7 +315,9 @@ void App::draw_fit_button() {
     ImGui::Spacing();
     ImGui::BeginDisabled(!haveData);
     const char* label = runs ? "Fit all runs again" : results_stale() ? "Fit again" : "Fit";
-    if (primary_button(label, ImVec2(-FLT_MIN, ImGui::GetFrameHeight() * 1.5f))) request_fit();
+    const bool pressed = primary_button("##fit", ImVec2(-FLT_MIN, ImGui::GetFrameHeight() * 1.5f));
+    draw_play_face(label);
+    if (pressed) request_fit();
     ImGui::EndDisabled();
     if (runs)
         item_tooltip(batchStale_ ? "Fit every run of " + import_.path.filename().string() +
@@ -300,24 +339,17 @@ void App::draw_fit_button() {
         warning_text("The last fit did not converge: see the Results tab.", analysis_->fit.message);
 }
 
-void App::draw_fit_options_section() {
-    ImGui::Spacing();
-    if (openFitOptions_) {
-        ImGui::SetNextItemOpen(true);
-        openFitOptions_ = false;
-    }
-    const bool open = ImGui::CollapsingHeader("Fitting options", ImGuiTreeNodeFlags_AllowOverlap);
-    if (ImGui::IsItemToggledOpen() && open) ImGui::SetScrollHereY(0.0f);  // bring the options into view
+// The fit settings, which fold, and below them the Fit button, which stays
+// in view when they are folded.
+void App::draw_fit_section() {
+    section_fold_heading(Section::Fit, "Fit", fitOpen_);
     help_link(HelpId::FittingOptions);
-    if (!open) {
-        ImGui::PushStyleColor(ImGuiCol_Text, palette().textDim);
-        ImGui::TextWrapped("%s", fit_settings_summary().c_str());
-        ImGui::PopStyleColor();
-        return;
+    if (fitOpen_) {
+        draw_parameter_table();
+        ImGui::Spacing();
+        draw_fit_settings();
     }
-    draw_parameter_table();
-    ImGui::Spacing();
-    draw_fit_settings();
+    draw_fit_button();
 }
 
 void App::draw_fit_settings() {
@@ -371,7 +403,9 @@ namespace {
 // a few rows (the panel scrolls if the window is too short for both).
 float table_height(float footer) {
     const float minHeight = ImGui::GetFrameHeightWithSpacing() * 6.0f;
-    return std::max(minHeight, ImGui::GetContentRegionAvail().y - footer);
+    // Measured from the panel's height, not the space left below the cursor,
+    // which shrinks while the panel is scrolled and would keep it scrolled.
+    return std::max(minHeight, ImGui::GetWindowHeight() - ImGui::GetCursorPosY() - footer);
 }
 
 // Narrow columns: numbers need about 10 font heights, not the panel's width.
@@ -386,7 +420,7 @@ void App::draw_data_table() {
     const bool arrhenius = def.family == kin::Family::Arrhenius;
 
     // The heading, with the table's buttons beside it.
-    section_heading("Data");
+    section_fold_heading(Section::Data, "Data", dataOpen_, true);
     struct Btn {
         const char* label;
         const char* tip;
@@ -416,6 +450,7 @@ void App::draw_data_table() {
     help_link(HelpId::Data);
 
     if (rows_.empty() || !rows_.back().x.empty() || !rows_.back().y.empty()) rows_.push_back({});
+    if (!dataOpen_) return;
 
     // After Fit (F5) with nothing to fit, say what to do here instead of in
     // an error box; the note goes once there are data.
@@ -528,11 +563,12 @@ void App::draw_run_points() {
     if (!item) return;
     const auto& def = kin::model_def(item->analysis ? item->analysis->model() : model_);
     const bool sheet = import_.type == ImportType::Spreadsheet;
-    section_heading("Data");
+    section_fold_heading(Section::Data, "Data", dataOpen_, true);
     ImGui::SameLine();
     ImGui::AlignTextToFramePadding();
     ImGui::TextDisabled("%s #%d, read-only", sheet ? "run" : "dataset", item->runNumber);
     help_link(HelpId::FileData);
+    if (!dataOpen_) return;
 
     // The points the run was fitted to, or for a run that failed, its points
     // as the file gives them.

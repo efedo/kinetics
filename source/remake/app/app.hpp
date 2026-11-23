@@ -3,11 +3,11 @@
 // Edit, Calculate, View, Help) and its Alt-key shortcuts are kept; the
 // screens become panels and tabs of one window.
 //
-// The window, top to bottom: the menus, a strip with the four steps of the
-// work (Data, Equation, Fit, Report), a banner while a run from an imported
-// file is shown, the left panel (equation, data, Fit) beside the right one
-// (results and graph, standard curve, file runs, report), and a status bar
-// with the next step or the latest message.
+// The window, top to bottom: the menus, a strip with the five steps of the
+// work (Data, Equation, Fit, Results, Report), a banner while a run from an
+// imported file is shown, the left panel (Data, Equation and Fit sections)
+// beside the right one (results and graph, standard curve, file runs,
+// report), and a status bar naming the data, or with the latest message.
 
 #include <array>
 #include <filesystem>
@@ -150,9 +150,8 @@ private:
     }
     enum class Example { MichaelisMenten, Arrhenius, SpreadsheetRuns, MpaPlate };
     void open_example(Example e);
-    // Fitting options: whether all are at their defaults, and a one-line summary.
+    // Whether all the fit settings (Fit section) are at their defaults.
     bool fit_settings_are_default() const;
-    std::string fit_settings_summary() const;
     // v0 is fixed and the table has a point at zero concentration: that velocity is used.
     bool v0_measured() const;
     // The results shown were fitted to data or settings that have changed since.
@@ -183,16 +182,20 @@ private:
     void draw_run_banner();
     void draw_panels(const ImVec2& size);
     void draw_status_bar(float height);
-    std::string next_step_hint() const;
     // A "(?)" at the right of the current line that opens a help topic.
     void help_link(HelpId id);
 
     // ---- UI: left panel (ui_data.cpp) -----------------------------------
     void draw_left_panel();
+    // The left panel's three sections, in the order of the steps; each folds.
+    enum class Section { Data, Equation, Fit };
+    // A section's heading. It opens the section, and scrolls it into view,
+    // when it is clicked open or asked for (gotoSection_).
+    void section_fold_heading(Section s, const char* title, bool& open, bool first = false);
     void draw_model_section();
     void draw_parameter_table();
     void draw_fit_button();
-    void draw_fit_options_section();
+    void draw_fit_section();
     void draw_fit_settings();
     void draw_data_table();
     void draw_run_points();  // the shown file run, read-only
@@ -232,8 +235,11 @@ private:
     kin::GuessMode guess_ = kin::GuessMode::Automatic;
     int maxIterations_ = 0;
     bool showBounds_ = false;
-    bool openFitOptions_ = false;     // expand "Fitting options" on the next frame
-    float leftFooterHeight_ = 0.0f;   // Fit button and options, below the data table (last frame)
+    bool dataOpen_ = true;            // the left panel's sections: unfolded?
+    bool equationOpen_ = true;
+    bool fitOpen_ = false;            // the fit settings: open when one is not the default
+    std::optional<Section> gotoSection_;  // open it and bring it into view on the next frame
+    float leftFooterHeight_ = 0.0f;   // Equation and Fit, below the data table (last frame)
     bool showEmptyHint_ = false;      // Fit was asked for with an empty table
     int textScale_ = 100;             // View > Text size, in percent
     float leftWidthEm_ = 26.0f;       // the left panel's width, in font heights (saved)

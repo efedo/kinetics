@@ -1,4 +1,4 @@
-// The window frame: the menus and shortcuts, the strip with the four steps
+// The window frame: the menus and shortcuts, the strip with the five steps
 // of the work, the banner shown with a run from an imported file, the two
 // panels and the splitter between them, and the status bar.
 
@@ -88,9 +88,9 @@ void step_chevron() {
 
 StepState verdict_state(const kin::Analysis& a, std::string& label) {
     switch (worst_level(fit_verdict(a))) {
-    case VerdictLevel::Good: label = "Fit: done"; return StepState::Done;
-    case VerdictLevel::Caution: label = "Fit: check the results"; return StepState::Warn;
-    case VerdictLevel::Bad: label = "Fit: poor fit"; return StepState::Bad;
+    case VerdictLevel::Good: label = "Results: good fit"; return StepState::Done;
+    case VerdictLevel::Caution: label = "Results: check the verdict"; return StepState::Warn;
+    case VerdictLevel::Bad: label = "Results: poor fit"; return StepState::Bad;
     }
     return StepState::Done;
 }
@@ -110,7 +110,7 @@ bool App::frame() {
     const ImGuiViewport* vp = ImGui::GetMainViewport();
     const float fs = ImGui::GetFontSize();
     if (std::exchange(firstFrame_, false) && vp->WorkSize.y < fs * 41.0f)
-        openFitOptions_ = false;  // a short window keeps the fitting options folded
+        fitOpen_ = false;  // a short window keeps the fit settings folded
 
     const float statusH = ImGui::GetFrameHeight() + ImGui::GetStyle().FramePadding.y * 2.0f;
     ImGui::SetNextWindowPos(vp->WorkPos);
@@ -186,11 +186,12 @@ void App::draw_step_strip() {
     // 1. Data
     std::string label;
     StepState state;
-    std::string tip = "Enter or edit the data in the table (Alt+D)";
+    std::string tip = "Go to the data table";
     if (item) {
         label = std::string("Data: ") + (sheet ? "run #" : "dataset #") + std::to_string(item->runNumber) + " of " + file;
         state = StepState::Done;
-        tip = "A run from the imported file is shown. Click to go back to your data table (Alt+D).";
+        tip = "A run from the imported file is shown. Click to go to its points; Back to my table, in the banner, "
+              "returns to your own data.";
     } else if (n == 0) {
         label = "Data: none yet";
         state = StepState::Ready;
@@ -204,37 +205,39 @@ void App::draw_step_strip() {
                   " not a number; those rows are left out of the fit. " + tip;
         }
     }
+    // A click on a step only goes to its place in the window; it never fits
+    // or writes anything.
     if (step_item(1, label, state, tip)) {
-        leave_run_view();
-        focusTable_ = true;
+        gotoSection_ = Section::Data;
+        if (!item) focusTable_ = true;
     }
 
     // 2. Equation
     step_chevron();
     const bool started = n > 0 || analysis_ || item;
     if (step_item(2, std::string("Equation: ") + equation_name(model_), started ? StepState::Done : StepState::Pending,
-                  "Choose the equation (Alt+T)"))
+                  "Go to the equation (Alt+T)")) {
+        gotoSection_ = Section::Equation;
         focusModel_ = true;
+    }
 
     // 3. Fit
     step_chevron();
-    tip = "Fit the equation to the data in the table (F5)";
-    if (item) {
-        tip = "Fit every run of the file again (F5)";
-        if (batchStale_) {
-            label = "Fit: out of date";
-            state = StepState::Warn;
-        } else if (!item->analysis) {
-            label = "Fit: failed";
-            state = StepState::Bad;
-        } else {
-            state = verdict_state(*item->analysis, label);
-        }
-    } else if (analysis_ && stale_) {
+    const kin::Analysis* shown = item ? (item->analysis ? &*item->analysis : nullptr)
+                                      : (analysis_ ? &*analysis_ : nullptr);
+    const bool outOfDate = item ? batchStale_ : (analysis_ && stale_);
+    if (outOfDate) {
         label = "Fit: out of date";
         state = StepState::Warn;
-    } else if (analysis_) {
-        state = verdict_state(*analysis_, label);
+    } else if (item && !item->analysis) {
+        label = "Fit: failed";
+        state = StepState::Bad;
+    } else if (shown && !shown->linear && shown->fit.status != kin::FitStatus::Converged) {
+        label = "Fit: did not converge";
+        state = StepState::Bad;
+    } else if (shown) {
+        label = "Fit: done";
+        state = StepState::Done;
     } else if (n > 0) {
         label = "Fit: press F5";
         state = StepState::Ready;
@@ -242,14 +245,32 @@ void App::draw_step_strip() {
         label = "Fit";
         state = StepState::Pending;
     }
-    if (step_item(3, label, state, tip)) request_fit();
+    if (step_item(3, label, state, "Go to the fit settings and the Fit button. Fit, or F5, fits."))
+        gotoSection_ = Section::Fit;
 
-    // 4. Report
+    // 4. Results
+    step_chevron();
+    tip = "Go to the results (Alt+L)";
+    if (!shown) {
+        label = "Results";
+        state = StepState::Pending;
+        tip = "The results appear on the right after a fit.";
+    } else if (outOfDate) {
+        label = "Results";
+        state = StepState::Pending;
+        tip = "These results are out of date: the data or settings have changed since the fit. Press Fit (F5) to "
+              "update them.";
+    } else {
+        state = verdict_state(*shown, label);
+    }
+    if (step_item(4, label, state, tip) && shown) requestedTab_ = Tab::Results;
+
+    // 5. Report
     step_chevron();
     const bool haveFit = analysis_.has_value();
-    if (step_item(4, reportWritten_ ? "Report: written" : "Report",
+    if (step_item(5, reportWritten_ ? "Report: written" : "Report",
                   reportWritten_ ? StepState::Done : haveFit ? StepState::Ready : StepState::Pending,
-                  haveFit ? "Write or copy a report of the results (Report tab; Alt+P writes it)"
+                  haveFit ? "Go to the Report tab, to write or copy a report of the results (Alt+P writes it)"
                           : "Report options (Alt+O). Reports can be written once there are results.")) {
         if (haveFit) requestedTab_ = Tab::Report;
         else show_report_options();
@@ -304,26 +325,6 @@ void App::draw_run_banner() {
     }
     ImGui::EndChild();
     ImGui::PopStyleColor(2);
-}
-
-std::string App::next_step_hint() const {
-    if (const auto* item = shown_item()) {
-        if (batchStale_) return "The settings have changed: press Fit all runs again (F5) to update the runs.";
-        if (!item->analysis) return "This run could not be fitted: " + item->error;
-        return "Step through the runs with the arrows above; the File runs tab lists them all.";
-    }
-    if (results_stale()) return "The data or settings have changed: press Fit (F5) to update the results.";
-    if (analysis_) {
-        if (worst_level(fit_verdict(*analysis_)) != VerdictLevel::Good)
-            return "Read the verdict at the top of the results before using these values.";
-        if (!reportWritten_) return "Next: write a report (Alt+P), or use Copy results for a spreadsheet.";
-        return "Report written. Change the data or the equation and fit again, or open another table (Ctrl+O).";
-    }
-    if (import_.type != ImportType::None && batch_.items.empty())
-        return "Next: press Analyse all runs on the File runs tab (Alt+A), or fit one run at a time.";
-    if (kin::clean_data(table_points()).empty())
-        return "Next: type or paste your data into the table, or open a data table (Ctrl+O).";
-    return "Next: press Fit (F5).";
 }
 
 void App::draw_status_bar(float height) {
@@ -389,7 +390,7 @@ void App::draw_status_bar(float height) {
                 notice_.reset();
             }
         } else {
-            // Where the data came from, then what to do next.
+            // Where the data came from.
             std::string where;
             if (const auto* item = shown_item())
                 where = std::string(import_.type == ImportType::Spreadsheet ? "Run #" : "Dataset #") +
@@ -399,17 +400,10 @@ void App::draw_status_bar(float height) {
                 where = n == 0 ? std::string("No data yet")
                                : dataSource_ + ", " + std::to_string(n) + " point" + (n == 1 ? "" : "s");
             }
-            const std::string sep = "   \xC2\xB7   ";
-            const std::string whereShown = fit_text(where, avail * 0.45f) + sep;
+            const std::string whereShown = fit_text(where, avail);
             ImGui::AlignTextToFramePadding();
             ImGui::TextDisabled("%s", whereShown.c_str());
-            if (whereShown != where + sep) item_tooltip(where);
-            ImGui::SameLine(0.0f, 0.0f);
-            const std::string hint = next_step_hint();
-            const std::string shown =
-                fit_text(hint, std::max(0.0f, avail - ImGui::CalcTextSize(whereShown.c_str()).x));
-            ImGui::TextUnformatted(shown.c_str());
-            if (shown != hint) item_tooltip(hint);
+            if (whereShown != where) item_tooltip(where);
         }
     }
     ImGui::End();
@@ -512,7 +506,7 @@ void App::draw_menu_bar() {
         if (ImGui::MenuItem("Manual (values in the parameter table)", nullptr, guess_ == kin::GuessMode::Manual)) {
             guess_ = kin::GuessMode::Manual;
             mark_stale();
-            openFitOptions_ = true;  // the estimates are entered there
+            gotoSection_ = Section::Fit;  // the estimates are entered there
         }
         ImGui::TextDisabled("Fitting method");
         if (ImGui::MenuItem("Marquardt-Levenberg", nullptr, method_ == kin::Method::Marquardt)) {

@@ -95,6 +95,44 @@ inline void section_heading(const char* title, bool first = false) {
 
 inline void section_heading(const std::string& title, bool first = false) { section_heading(title.c_str(), first); }
 
+// A section heading that folds: the same title after a small arrow. A click
+// on either folds or unfolds the section (`open`). Returns true when clicked.
+inline bool foldable_heading(const char* title, bool& open, bool first = false) {
+    if (!first) ImGui::Dummy(ImVec2(0.0f, ImGui::GetFontSize() * 0.5f));
+    push_heading_font();
+    const ImGuiStyle& st = ImGui::GetStyle();
+    const float fs = ImGui::GetFontSize();
+    const float h = ImGui::GetFrameHeight();
+    const float arrowW = std::round(fs * 1.0f);
+    const ImVec2 ts = ImGui::CalcTextSize(title);
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const ImVec2 size(arrowW + ts.x + st.FramePadding.x, h);
+    ImGui::AlignTextToFramePadding();  // so that buttons and links after it line up with the title
+    ImGui::PushID(title);
+    const bool clicked = ImGui::InvisibleButton("##fold", size);
+    ImGui::PopID();
+    if (clicked) open = !open;
+    const bool hovered = ImGui::IsItemHovered();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    if (hovered)
+        dl->AddRectFilled(p, ImVec2(p.x + size.x, p.y + size.y), ImGui::GetColorU32(ImGuiCol_ButtonHovered),
+                          st.FrameRounding);
+    // The arrow: pointing down when open, right when folded.
+    const ImU32 arrow = ImGui::GetColorU32(hovered ? ImGui::GetStyleColorVec4(ImGuiCol_Text) : palette().textDim);
+    const float r = fs * 0.22f;
+    const ImVec2 c(p.x + arrowW * 0.45f, p.y + h * 0.5f);
+    if (open)
+        dl->AddTriangleFilled(ImVec2(c.x - r, c.y - r * 0.55f), ImVec2(c.x + r, c.y - r * 0.55f),
+                              ImVec2(c.x, c.y + r * 0.65f), arrow);
+    else
+        dl->AddTriangleFilled(ImVec2(c.x - r * 0.55f, c.y - r), ImVec2(c.x + r * 0.65f, c.y),
+                              ImVec2(c.x - r * 0.55f, c.y + r), arrow);
+    dl->AddText(ImVec2(p.x + arrowW, p.y + std::round((h - ts.y) * 0.5f)), ImGui::GetColorU32(ImGuiCol_Text), title);
+    ImGui::PopFont();
+    ImGui::SetItemTooltip(open ? "Click to fold this section" : "Click to show this section");
+    return clicked;
+}
+
 // Text drawn at the right edge of the line, after SameLine.
 inline void same_line_right(float width) {
     const float x = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - width;

@@ -170,7 +170,7 @@ std::vector<VerdictLine> fit_verdict(const kin::Analysis& a) {
 
     if (!a.linear && f.status != kin::FitStatus::Converged)
         bad.push_back({VerdictLevel::Bad, "The fit did not converge, so these may not be the best values.",
-                       f.message + " Try a higher iteration limit or other initial estimates (Fitting options)."});
+                       f.message + " Try a higher iteration limit or other initial estimates (in the Fit section)."});
 
     // Parameters held at a bound: the data did not determine them.
     std::vector<bool> atBound(def.params.size(), false);
@@ -188,7 +188,7 @@ std::vector<VerdictLine> fit_verdict(const kin::Analysis& a) {
         bad.push_back({VerdictLevel::Bad,
                        name(j) + " could not be determined: it reached its " + (h.upper ? "upper" : "lower") +
                            " limit of " + kin::fmt_g(h.bound, 3) + ".",
-                       "This equation may not suit these data; try another, or change the limit (Fitting options "
+                       "This equation may not suit these data; try another, or change the limit (Fit section "
                        "> Show bounds)."});
     }
 
