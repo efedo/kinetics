@@ -73,6 +73,42 @@ void App::draw_dialogs() {
 
     draw_report_options_dialog();
     draw_about_dialog();
+    draw_replace_dialog();
+}
+
+// Replacing every run (a new analysis, an import, an example) cannot be
+// undone, so it waits for a yes.
+void App::draw_replace_dialog() {
+    const char* id = "Replace the data?##replace";
+    if (openReplace_) {
+        ImGui::OpenPopup(id);
+        openReplace_ = false;
+    }
+    center_next_window();
+    if (!ImGui::BeginPopupModal(id, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
+    const int n = static_cast<int>(runs_.size());
+    int points = 0;
+    for (int k = 0; k < n; ++k) points += run_point_count(k);
+    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);
+    ImGui::TextWrapped("%s replaces the data there is now: %d run%s with %d point%s in all, and %s results. This "
+                       "cannot be undone.",
+                       replaceWhat_.c_str(), n, n == 1 ? "" : "s", points, points == 1 ? "" : "s",
+                       n == 1 ? "its" : "their");
+    ImGui::TextDisabled("To keep them, cancel and save the analysis first (File > Save analysis).");
+    ImGui::PopTextWrapPos();
+    ImGui::Spacing();
+    if (ImGui::Button("Replace")) {
+        auto action = std::move(pendingReplace_);
+        pendingReplace_ = nullptr;
+        ImGui::CloseCurrentPopup();
+        if (action) action();
+    }
+    ImGui::SameLine();
+    if (close_button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+        pendingReplace_ = nullptr;
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
 }
 
 void App::draw_report_options_dialog() {

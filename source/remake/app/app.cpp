@@ -11,6 +11,7 @@
 #include "app/help_text.hpp"
 #include "app/theme.hpp"
 #include "app/ui_common.hpp"
+#include "core/project.hpp"
 
 namespace app {
 
@@ -25,9 +26,10 @@ void App::init(const std::filesystem::path& prefDir, const std::filesystem::path
     load_settings();
     const auto model = model_;
     set_model(model);
-    stale_ = batchStale_ = false;
+    stale_ = false;
     // Show the fit settings folded only when they hold nothing unusual.
     fitOpen_ = !fit_settings_are_default();
+    requestedTab_ = Tab::Results;  // the getting-started page, until there are results
 }
 
 void App::shutdown() { save_settings(); }
@@ -141,21 +143,6 @@ bool App::v0_measured() const {
     return false;
 }
 
-bool App::results_stale() const {
-    if (!analysis_) return false;
-    return showing_run() ? batchStale_ : stale_;
-}
-
-void App::close_import() {
-    leave_run_view();  // back to the table's own results
-    ImportState fresh;
-    fresh.negativeIsMissing = import_.negativeIsMissing;  // preferences, not the file
-    fresh.mpaCount = import_.mpaCount;
-    import_ = std::move(fresh);
-    batch_ = BatchState{};
-    batchStale_ = false;
-}
-
 std::string App::report_file_tooltip() const {
     std::string s = "Add this report to the report file (Alt+P). ";
     if (kIsWeb) return s + "The whole report file is downloaded each time.";
@@ -205,8 +192,8 @@ bool App::fit_settings_are_default() const {
 }
 
 std::vector<kin::Point> App::table_points(int* invalidCells) const {
-    std::vector<kin::Point> pts;
     int invalid = 0;
+    std::vector<kin::Point> pts;
     for (const auto& r : rows_) {
         double x = NAN, y = NAN;
         const auto cx = parse_cell(r.x, x);
@@ -220,7 +207,6 @@ std::vector<kin::Point> App::table_points(int* invalidCells) const {
 }
 
 void App::set_table(const std::vector<kin::Point>& pts) {
-    leave_run_view();  // what changes is the table, so show it
     dataOpen_ = true;
     // The same points again (the classic interface's data editor closed
     // without a change, a table already in order sorted): the results still
@@ -233,16 +219,6 @@ void App::set_table(const std::vector<kin::Point>& pts) {
         return;
     rows_.clear();
     for (const auto& p : pts) rows_.push_back({number_text(p.x), number_text(p.y)});
-    rows_.push_back({});
-    mark_table_changed();
-}
-
-void App::set_table_y(const std::vector<double>& ys) {
-    leave_run_view();
-    // Keep existing X values (MPA files carry velocities only).
-    while (!rows_.empty() && rows_.back().x.empty() && rows_.back().y.empty()) rows_.pop_back();
-    if (rows_.size() < ys.size()) rows_.resize(ys.size());
-    for (size_t i = 0; i < rows_.size(); ++i) rows_[i].y = i < ys.size() ? number_text(ys[i]) : std::string();
     rows_.push_back({});
     mark_table_changed();
 }
@@ -270,7 +246,6 @@ App::TableSnapshot App::snapshot_table() const {
 }
 
 void App::restore_table(TableSnapshot s) {
-    leave_run_view();
     rows_ = std::move(s.rows);
     rows_.push_back({});
     mark_table_changed();  // also closes the message
@@ -314,39 +289,39 @@ void App::open_table_file(const std::filesystem::path& path) {
         error(path.filename().string() + " does not contain two columns of numbers.", path.string());
         return;
     }
+    // The run's table as it was can be put back from the status bar.
+    auto before = snapshot_table();
     set_table(pts);
     tablePath_ = path;
     dataSource_ = path.filename().string();
     dataRun_.reset();
+    if (!before.rows.empty()) {
+        Notice n;
+        n.text = path.filename().string() + " read into " + run_label(current_) + ".";
+        n.undo = [this, before = std::move(before)]() mutable { restore_table(std::move(before)); };
+        n.undoTooltip = "Put back the data the run had";
+        notice_ = std::move(n);
+    }
 }
 
 void App::open_example(Example e) {
     const auto ex = exeDir_ / "examples";
+    // An example is a new analysis, in place of the data there is.
+    auto table = [this](kin::ModelId model, std::filesystem::path path) {
+        confirm_replace("Opening the example", [this, model, path]() {
+            replace_runs({});
+            analysisPath_.clear();
+            set_model(model);
+            open_table_file(path);
+            notice_.reset();
+            requestedTab_ = Tab::Results;
+        });
+    };
     switch (e) {
-    case Example::MichaelisMenten:
-        set_model(kin::ModelId::MichaelisMenten);
-        open_table_file(ex / "michaelis_menten.csv");
-        break;
-    case Example::Arrhenius:
-        set_model(kin::ModelId::Arrhenius);
-        open_table_file(ex / "arrhenius.csv");
-        break;
-    case Example::SpreadsheetRuns:
-        set_model(kin::ModelId::HillGt0);
-        import_spreadsheet(ex / "spreadsheet_runs.txt");
-        break;
-    case Example::RunsInColumns:
-        set_model(kin::ModelId::HillGt0);
-        import_spreadsheet(ex / "runs_in_columns.csv");
-        break;
-    case Example::MpaPlate:
-        set_model(kin::ModelId::InhibitionLinear);
-        set_table({{0, NAN}, {0.5, NAN}, {1, NAN}, {2, NAN}, {4, NAN}, {8, NAN}, {16, NAN}, {32, NAN}});
-        dataSource_ = "[I] values for the MPA example";
-        import_mpa(ex / "mpa_plate.txt");
-        load_selected_run_into_table();
-        notice_.reset();  // nothing of the user's was replaced
-        break;
+    case Example::MichaelisMenten: table(kin::ModelId::MichaelisMenten, ex / "michaelis_menten.csv"); break;
+    case Example::Arrhenius: table(kin::ModelId::Arrhenius, ex / "arrhenius.csv"); break;
+    case Example::SpreadsheetRuns: import_runs_file(ex / "spreadsheet_runs.txt", true, kin::ModelId::HillGt0); break;
+    case Example::RunsInColumns: import_runs_file(ex / "runs_in_columns.csv", true, kin::ModelId::HillGt0); break;
     }
 }
 
@@ -397,14 +372,7 @@ kin::AnalysisRequest App::make_request(std::vector<kin::Point> data) const {
 }
 
 void App::request_fit() {
-    // F5 fits what is on screen: while a file run is shown, the file's runs,
-    // once the settings have changed (fitting them again unchanged would only
-    // repeat any reports).
-    if (showing_run()) {
-        if (batchStale_) refit_runs();
-        else info("The runs are already fitted with these settings. To fit your own table, press Back to my table.");
-        return;
-    }
+    // F5 fits the run shown (Fit all runs, on the Runs tab, fits them all).
     const auto pts = kin::clean_data(table_points());
     if (pts.empty()) {
         // A note above the table says what to do, and the cursor goes there.
@@ -419,16 +387,16 @@ void App::request_fit() {
     fit_now();
 }
 
-void App::fit_now() {
-    leave_run_view();
-    apply_analysis(kin::analyse(make_request(table_points())), dataRun_);
-}
+void App::fit_now() { apply_analysis(kin::analyse(make_request(table_points())), dataRun_); }
 
 void App::apply_analysis(kin::AnalysisOutcome outcome, std::optional<int> runNumber) {
+    auto& run = runs_[static_cast<size_t>(current_)];
     if (!outcome.analysis) {
+        run.error = outcome.error;
         error(outcome.error);
         return;
     }
+    run.error.clear();
     analysis_ = std::move(outcome.analysis);
     analysisRun_ = runNumber;
     stale_ = false;
@@ -442,7 +410,399 @@ void App::apply_analysis(kin::AnalysisOutcome outcome, std::optional<int> runNum
 }
 
 // ===========================================================================
-// File runs
+// Runs
+// ===========================================================================
+
+namespace {
+
+// A run's points from its table rows (see App::table_points).
+std::vector<kin::Point> points_of(const std::vector<DataRow>& rows, int* invalidCells = nullptr) {
+    std::vector<kin::Point> pts;
+    int invalid = 0;
+    for (const auto& r : rows) {
+        double x = NAN, y = NAN;
+        const auto cx = parse_cell(r.x, x);
+        const auto cy = parse_cell(r.y, y);
+        invalid += (cx == CellState::Invalid) + (cy == CellState::Invalid);
+        if (cx == CellState::Blank && cy == CellState::Blank) continue;
+        pts.push_back({cx == CellState::Number ? x : NAN, cy == CellState::Number ? y : NAN});
+    }
+    if (invalidCells) *invalidCells = invalid;
+    return pts;
+}
+
+std::vector<DataRow> rows_of(const std::vector<kin::Point>& pts) {
+    std::vector<DataRow> rows;
+    for (const auto& p : pts) rows.push_back({number_text(p.x), number_text(p.y)});
+    rows.push_back({});
+    return rows;
+}
+
+Run new_run(int number) { return Run{"Run " + std::to_string(number), {DataRow{}}, "Entered by hand", {}, false, {}}; }
+
+}  // namespace
+
+void App::commit_run() {
+    auto& r = runs_[static_cast<size_t>(current_)];
+    r.rows = rows_;
+    r.source = dataSource_;
+    r.analysis = analysis_;
+    r.stale = stale_;
+}
+
+void App::load_run(int k) {
+    current_ = std::clamp(k, 0, static_cast<int>(runs_.size()) - 1);
+    const auto& r = runs_[static_cast<size_t>(current_)];
+    rows_ = r.rows;
+    if (rows_.empty() || !rows_.back().x.empty() || !rows_.back().y.empty()) rows_.push_back({});
+    dataSource_ = r.source;
+    analysis_ = r.analysis;
+    stale_ = r.stale;
+    dataRun_.reset();
+    analysisRun_.reset();
+    reportWritten_ = false;
+    refitPlot_ = true;
+    hoveredPoint_ = hoverNext_ = -1;
+}
+
+void App::select_run(int k) {
+    if (k < 0 || k >= static_cast<int>(runs_.size())) return;
+    if (k == current_) return;
+    commit_run();
+    load_run(k);
+    notice_.reset();  // its Undo would act on the run left
+    if (analysis_) {
+        const auto plots = kin::available_plots(analysis_->model());
+        if (std::find(plots.begin(), plots.end(), plotType_) == plots.end()) set_plot_type(kin::PlotType::Normal);
+    }
+}
+
+void App::add_run() {
+    commit_run();
+    runs_.push_back(new_run(static_cast<int>(runs_.size()) + 1));
+    load_run(static_cast<int>(runs_.size()) - 1);
+    runsAsImported_ = false;  // reading the file again would lose the run
+    notice_.reset();
+    dataOpen_ = true;
+    focusTable_ = true;
+    gotoSection_ = Section::Data;
+}
+
+void App::delete_run(int k) {
+    if (runs_.size() < 2 || k < 0 || k >= static_cast<int>(runs_.size())) return;
+    commit_run();
+    const int shown = current_;
+    const std::string label = run_label(k);
+    Run removed = runs_[static_cast<size_t>(k)];
+    runs_.erase(runs_.begin() + k);
+    runsAsImported_ = false;
+    // The run shown stays shown, unless it is the one deleted.
+    load_run(k < shown ? shown - 1 : std::min(shown, static_cast<int>(runs_.size()) - 1));
+    Notice n;
+    n.text = "Deleted " + label + ".";
+    n.undoTooltip = "Put the run back";
+    n.undo = [this, k, shown, removed]() {
+        commit_run();
+        runs_.insert(runs_.begin() + std::min(k, static_cast<int>(runs_.size())), removed);
+        load_run(shown);
+    };
+    notice_ = std::move(n);
+}
+
+void App::fit_run(int k) {
+    select_run(k);
+    request_fit();
+}
+
+void App::fit_all_runs() {
+    commit_run();
+    const auto tmpl = make_request({});
+    int fitted = 0, failed = 0, empty = 0;
+    for (auto& r : runs_) {
+        auto pts = points_of(r.rows);
+        if (kin::clean_data(pts).empty()) {
+            ++empty;
+            continue;
+        }
+        auto request = tmpl;
+        request.data = std::move(pts);
+        auto outcome = kin::analyse(request);
+        if (outcome.analysis) {
+            r.analysis = std::move(outcome.analysis);
+            r.stale = false;
+            r.error.clear();
+            ++fitted;
+        } else {
+            r.error = outcome.error;
+            ++failed;
+        }
+    }
+    load_run(current_);
+    std::string s = "Fitted " + std::to_string(fitted) + " run" + (fitted == 1 ? "" : "s");
+    if (failed > 0) s += "; " + std::to_string(failed) + " could not be fitted (see the Runs tab)";
+    if (empty > 0) s += "; " + std::to_string(empty) + " without data";
+    info(s + ".");
+    if (failed > 0) notice_->isError = true;
+    if (analysis_) {
+        const auto plots = kin::available_plots(analysis_->model());
+        if (std::find(plots.begin(), plots.end(), plotType_) == plots.end()) set_plot_type(kin::PlotType::Normal);
+    }
+}
+
+std::string App::run_own_name(int k) const {
+    if (k < 0 || k >= static_cast<int>(runs_.size())) return {};
+    const auto& name = runs_[static_cast<size_t>(k)].name;
+    // A plain number, or "Run" and a number ("Run 4", "run #4"), is a run
+    // number rather than a name: runs are numbered by their place.
+    std::string rest;
+    for (char c : name) rest += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (rest.rfind("run", 0) == 0) rest.erase(0, 3);
+    rest.erase(0, rest.find_first_not_of(" #"));
+    const bool number = !rest.empty() && rest.find_first_not_of("0123456789") == std::string::npos;
+    if (name.empty() || number) return {};
+    return name;
+}
+
+std::string App::run_label(int k) const {
+    const std::string own = run_own_name(k);
+    return "Run " + std::to_string(k + 1) + (own.empty() ? "" : ": " + own);
+}
+
+int App::run_point_count(int k) const {
+    const auto& rows = k == current_ ? rows_ : runs_[static_cast<size_t>(k)].rows;
+    return static_cast<int>(kin::clean_data(points_of(rows)).size());
+}
+
+const kin::Analysis* App::run_analysis(int k) const {
+    if (k == current_) return analysis_ ? &*analysis_ : nullptr;
+    const auto& a = runs_[static_cast<size_t>(k)].analysis;
+    return a ? &*a : nullptr;
+}
+
+bool App::run_stale(int k) const { return k == current_ ? stale_ : runs_[static_cast<size_t>(k)].stale; }
+
+bool App::any_results() const {
+    for (int k = 0; k < static_cast<int>(runs_.size()); ++k)
+        if (run_analysis(k)) return true;
+    return false;
+}
+
+bool App::have_data() const {
+    for (int k = 0; k < static_cast<int>(runs_.size()); ++k)
+        for (const auto& p : points_of(k == current_ ? rows_ : runs_[static_cast<size_t>(k)].rows))
+            if (std::isfinite(p.x) || std::isfinite(p.y)) return true;
+    return false;
+}
+
+std::optional<int> App::report_run_number(int k) const {
+    if (runs_.size() > 1) return k + 1;
+    return analysisRun_;
+}
+
+void App::replace_runs(std::vector<Run> runs) {
+    if (runs.empty()) runs.push_back(new_run(1));
+    runs_ = std::move(runs);
+    load_run(0);
+    runsFile_.clear();
+    runsText_.clear();
+    runsAsImported_ = false;
+    notice_.reset();
+    dataOpen_ = true;
+    predictFromX_.clear();
+    predictFromY_.clear();
+}
+
+void App::confirm_replace(const std::string& what, std::function<void()> action) {
+    if (!have_data()) {
+        action();
+        return;
+    }
+    replaceWhat_ = what;
+    pendingReplace_ = std::move(action);
+    openReplace_ = true;
+}
+
+void App::new_analysis() {
+    confirm_replace("A new analysis", [this]() {
+        replace_runs({});
+        analysisPath_.clear();
+        requestedTab_ = Tab::Results;
+    });
+}
+
+// Runs from a parsed file of runs.
+static std::vector<Run> runs_from(const kin::SpreadsheetFile& f, bool negativeIsMissing, const std::string& source) {
+    std::vector<Run> runs;
+    for (const auto& r : f.runs) {
+        Run run;
+        run.name = r.name.empty() ? "Run " + std::to_string(runs.size() + 1) : r.name;
+        run.rows = rows_of(f.points(r, negativeIsMissing));
+        run.source = source;
+        runs.push_back(std::move(run));
+    }
+    return runs;
+}
+
+void App::import_runs_file(const std::filesystem::path& path, bool ask, std::optional<kin::ModelId> model) {
+    const auto text = kin::read_text_file(path);
+    const std::string name = path.filename().string();
+    if (!text) {
+        error("Can't open " + name + ".", path.string());
+        return;
+    }
+    // A saved analysis, by its first line.
+    if (kin::parse_project(*text).project) {
+        open_analysis_file(path, ask);
+        return;
+    }
+    // v3.51's print-to-file format, or a table with a run in each column.
+    const bool table = !kin::is_v351_spreadsheet(*text);
+    const auto parsed = table ? kin::parse_run_table(*text, false) : kin::parse_spreadsheet(*text);
+    if (!parsed.file) {
+        error(name + ": " + parsed.error, path.string());
+        return;
+    }
+    auto runs = runs_from(*parsed.file, import_.negativeIsMissing, name);
+    auto apply = [this, path, text = *text, table, runs = std::move(runs), model]() mutable {
+        replace_runs(std::move(runs));
+        if (model) set_model(*model);
+        runsFile_ = path;
+        runsText_ = std::move(text);
+        runsTable_ = table;
+        runsInRows_ = false;
+        runsAsImported_ = true;
+        analysisPath_.clear();
+        requestedTab_ = Tab::Runs;
+    };
+    if (ask) confirm_replace("Importing " + name, std::move(apply));
+    else apply();
+}
+
+void App::reread_runs_file() {
+    if (!runsAsImported_ || runsText_.empty()) return;
+    const std::string name = runsFile_.filename().string();
+    const auto parsed = runsTable_ ? kin::parse_run_table(runsText_, runsInRows_) : kin::parse_spreadsheet(runsText_);
+    if (!parsed.file) {
+        error(name + ": " + parsed.error, runsFile_.string());
+        runsInRows_ = !runsInRows_;  // the choice that read the file
+        return;
+    }
+    const auto file = runsFile_;
+    auto text = std::move(runsText_);
+    const bool table = runsTable_, rows = runsInRows_;
+    replace_runs(runs_from(*parsed.file, import_.negativeIsMissing, name));
+    runsFile_ = file;
+    runsText_ = std::move(text);
+    runsTable_ = table;
+    runsInRows_ = rows;
+    runsAsImported_ = true;
+}
+
+void App::open_analysis_file(const std::filesystem::path& path, bool ask) {
+    const auto text = kin::read_text_file(path);
+    const std::string name = path.filename().string();
+    if (!text) {
+        error("Can't open " + name + ".", path.string());
+        return;
+    }
+    auto parsed = kin::parse_project(*text);
+    if (!parsed.project) {
+        error(name + ": " + parsed.error, path.string());
+        return;
+    }
+    auto apply = [this, path, p = std::move(*parsed.project)]() {
+        std::vector<Run> runs;
+        std::vector<bool> fitted;
+        for (const auto& r : p.runs) {
+            Run run;
+            run.name = r.name;
+            run.rows = rows_of(r.points);
+            run.source = path.filename().string();
+            runs.push_back(std::move(run));
+            fitted.push_back(r.fitted);
+        }
+        replace_runs(std::move(runs));
+        set_model(p.model);
+        params_ = p.params;
+        method_ = p.method;
+        guess_ = p.guess;
+        maxIterations_ = p.maxIterations;
+        xUnit_ = p.xUnit;
+        yUnit_ = p.yUnit;
+        fitOpen_ = !fit_settings_are_default();
+        // The runs that had results have them again: the same data and
+        // settings give the same fit.
+        const auto tmpl = make_request({});
+        for (size_t k = 0; k < runs_.size(); ++k) {
+            if (!fitted[k]) continue;
+            auto request = tmpl;
+            request.data = points_of(runs_[k].rows);
+            auto outcome = kin::analyse(request);
+            if (outcome.analysis) runs_[k].analysis = std::move(outcome.analysis);
+            else runs_[k].error = outcome.error;
+        }
+        load_run(0);
+        analysisPath_ = path;
+        requestedTab_ = Tab::Results;
+        save_settings();
+        info("Opened " + path.filename().string() + ".", path.string());
+    };
+    if (ask) confirm_replace("Opening " + name, std::move(apply));
+    else apply();
+}
+
+void App::save_analysis(const std::filesystem::path& path) {
+    commit_run();
+    kin::Project p;
+    p.model = model_;
+    p.params = params_;
+    p.method = method_;
+    p.guess = guess_;
+    p.maxIterations = maxIterations_;
+    p.xUnit = xUnit_;
+    p.yUnit = yUnit_;
+    for (const auto& r : runs_)
+        p.runs.push_back(kin::ProjectRun{r.name, points_of(r.rows), r.analysis.has_value()});
+    if (!kin::write_text_file(path, kin::format_project(p), false)) {
+        error("Can't write " + path.filename().string() + ".", path.string());
+        return;
+    }
+    analysisPath_ = path;
+    file_written(path);
+    info("Saved the analysis as " + path.filename().string() + ".", path.string());
+}
+
+void App::ask_analysis_file() {
+    const std::string name = !analysisPath_.empty() ? analysisPath_.filename().string()
+                             : !runsFile_.empty()   ? runsFile_.stem().string() + ".kinetics"
+                                                    : std::string("analysis.kinetics");
+    show_save_dialog(FilePurpose::SaveAnalysis, default_dir() + name);
+}
+
+void App::save_analysis_or_ask() {
+    // In the browser every save is a download, named each time.
+    if (analysisPath_.empty() || kIsWeb) ask_analysis_file();
+    else save_analysis(analysisPath_);
+}
+
+void App::export_runs(const std::filesystem::path& path) {
+    commit_run();
+    std::vector<kin::NamedPoints> runs;
+    for (int k = 0; k < static_cast<int>(runs_.size()); ++k)
+        runs.push_back({run_own_name(k).empty() ? "Run " + std::to_string(k + 1) : runs_[static_cast<size_t>(k)].name,
+                        points_of(runs_[static_cast<size_t>(k)].rows)});
+    if (!kin::write_text_file(path, kin::format_run_table(runs, x_heading(model_)), false)) {
+        error("Can't write " + path.filename().string() + ".", path.string());
+        return;
+    }
+    file_written(path);
+    info("Saved " + std::to_string(runs.size()) + " run" + (runs.size() == 1 ? "" : "s") + " as " +
+             path.filename().string() + ", a table with a run in each column.",
+         path.string());
+}
+
+// ===========================================================================
+// The classic interface's file of runs
 // ===========================================================================
 
 void App::import_spreadsheet(const std::filesystem::path& path) {
@@ -458,7 +818,6 @@ void App::import_spreadsheet(const std::filesystem::path& path) {
         error(path.filename().string() + ": " + parsed.error, path.string());
         return;
     }
-    leave_run_view();
     import_.type = ImportType::Spreadsheet;
     import_.path = path;
     import_.sheet = std::move(parsed.file);
@@ -469,37 +828,6 @@ void App::import_spreadsheet(const std::filesystem::path& path) {
     import_.selectedRun = import_.sheet->runs.front().number;
     batch_ = BatchState{};
     batch_.firstRun = import_.selectedRun;
-    batchStale_ = false;
-    requestedTab_ = Tab::FileRuns;
-}
-
-void App::set_runs_in_rows(bool rows) {
-    if (!import_.table || rows == import_.runsInRows) return;
-    auto parsed = kin::parse_run_table(import_.tableText, rows);
-    if (!parsed.file) {
-        // The file stays as it was read.
-        error(import_.path.filename().string() + ": " + parsed.error, import_.path.string());
-        return;
-    }
-    import_.runsInRows = rows;
-    leave_run_view();
-    batch_ = BatchState{};
-    batchStale_ = false;
-    import_.sheet = std::move(parsed.file);
-    import_.selectedRun = import_.sheet->runs.front().number;
-    batch_.firstRun = import_.selectedRun;
-}
-
-std::string App::run_name(int number) const {
-    if (import_.type != ImportType::Spreadsheet || !import_.sheet) return {};
-    const auto* run = import_.sheet->find_run(number);
-    if (!run || run->name.empty()) return {};
-    // A heading that only repeats the number ("3", "Run 3") adds nothing.
-    std::string lower;
-    for (char c : run->name) lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    const std::string n = std::to_string(number);
-    if (lower == n || lower == "run " + n || lower == "run" + n || lower == "run #" + n) return {};
-    return run->name;
 }
 
 void App::import_mpa(const std::filesystem::path& path) {
@@ -508,166 +836,12 @@ void App::import_mpa(const std::filesystem::path& path) {
         error("Can't open " + path.filename().string() + ".", path.string());
         return;
     }
-    leave_run_view();
     import_.type = ImportType::Mpa;
     import_.path = path;
     import_.sheet.reset();
     import_.mpaText = *text;
     import_.selectedRun = 1;
     batch_ = BatchState{};
-    batchStale_ = false;
-    requestedTab_ = Tab::FileRuns;
-}
-
-bool App::load_selected_run_into_table() {
-    const auto name = import_.path.filename().string();
-    leave_run_view();
-    // The table it replaces can be put back from the status bar.
-    const auto before = snapshot_table();
-    std::string what;
-    if (import_.type == ImportType::Spreadsheet) {
-        const auto* run = import_.sheet->find_run(import_.selectedRun);
-        if (!run) {
-            error("Run #" + std::to_string(import_.selectedRun) + " not found in " + name + ".");
-            return false;
-        }
-        set_table(import_.sheet->points(*run, import_.negativeIsMissing));
-        dataSource_ = "Run #" + std::to_string(run->number) + " of " + name;
-        dataRun_ = run->number;
-        what = "Run #" + std::to_string(run->number);
-    } else if (import_.type == ImportType::Mpa) {
-        const auto ds = kin::parse_mpa_dataset(import_.mpaText, import_.selectedRun, import_.mpaCount);
-        if (!ds.error.empty()) {
-            error(name + ": " + ds.error);
-            return false;
-        }
-        set_table_y(ds.y);
-        dataSource_ = "Dataset #" + std::to_string(import_.selectedRun) + " of " + name + " (velocities)";
-        dataRun_ = import_.selectedRun;
-        what = "The velocities of dataset #" + std::to_string(import_.selectedRun);
-    } else {
-        error("No file is imported. Use File > Import spreadsheet file of runs, or Import plate-reader file.");
-        return false;
-    }
-    if (!before.rows.empty()) {
-        Notice n;
-        n.text = what + " of " + name + " copied into the table.";
-        n.undo = before;
-        n.undoTooltip = "Put back the table as it was";
-        notice_ = std::move(n);
-    }
-    return true;
-}
-
-void App::fit_selected_run() {
-    if (!load_selected_run_into_table()) return;
-    const auto undo = std::exchange(notice_, std::nullopt);
-    request_fit();
-    if (!notice_ && undo) notice_ = undo;  // keep the Undo unless the fit had something to say
-}
-
-void App::analyse_all_runs() {
-    const auto tmpl = make_request({});
-    std::vector<kin::BatchItem> items;
-    if (import_.type == ImportType::Spreadsheet) {
-        items = kin::analyse_spreadsheet_runs(*import_.sheet, batch_.firstRun, tmpl, import_.negativeIsMissing);
-        if (items.empty()) {
-            error("Run #" + std::to_string(batch_.firstRun) + " not found in " + import_.path.filename().string() + ".");
-            return;
-        }
-    } else if (import_.type == ImportType::Mpa) {
-        std::vector<double> xs;
-        for (const auto& r : rows_) {
-            double x = NAN;
-            if (parse_cell(r.x, x) == CellState::Number) xs.push_back(x);
-            else if (!r.x.empty() || !r.y.empty()) xs.push_back(NAN);
-        }
-        int have = 0;
-        for (int i = 0; i < import_.mpaCount && i < static_cast<int>(xs.size()); ++i) have += std::isfinite(xs[static_cast<size_t>(i)]);
-        if (have < import_.mpaCount) {
-            error("MPA files hold velocities only: enter the " + std::to_string(import_.mpaCount) +
-                  " concentrations in the X column of the data table first.");
-            return;
-        }
-        xs.resize(static_cast<size_t>(import_.mpaCount));
-        items = kin::analyse_mpa_datasets(import_.mpaText, batch_.firstRun, import_.mpaCount, xs, tmpl);
-        if (items.empty()) {
-            error("Dataset #" + std::to_string(batch_.firstRun) + " not found in " + import_.path.filename().string() + ".");
-            return;
-        }
-    } else {
-        error("No file is imported. Use File > Import spreadsheet file of runs, or Import plate-reader file.");
-        return;
-    }
-    // The new list replaces the one any shown run came from.
-    leave_run_view();
-    batch_.items = std::move(items);
-    batch_.selected = -1;
-    batchStale_ = false;
-    int ok = 0;
-    for (const auto& it : batch_.items) ok += it.analysis.has_value();
-    batch_.status = "Analysed " + std::to_string(batch_.items.size()) + " run(s): " + std::to_string(ok) + " fitted";
-    if (ok < static_cast<int>(batch_.items.size()))
-        batch_.status += ", " + std::to_string(batch_.items.size() - ok) + " failed";
-    batch_.status += ".";
-    for (size_t i = 0; i < batch_.items.size(); ++i)
-        if (batch_.items[i].analysis) {
-            show_batch_item(static_cast<int>(i));
-            dataOpen_ = true;  // the Data section shows the run's points
-            break;
-        }
-    if (batch_.writeReports) write_batch_reports();
-}
-
-void App::show_batch_item(int index) {
-    if (index < 0 || index >= static_cast<int>(batch_.items.size())) return;
-    // The table's own fit waits while the run is shown.
-    if (!tableResult_) tableResult_ = TableResult{analysis_, analysisRun_};
-    batch_.selected = index;
-    const auto& item = batch_.items[static_cast<size_t>(index)];
-    analysis_ = item.analysis;  // empty for a run that could not be fitted
-    analysisRun_ = item.runNumber;
-    import_.selectedRun = item.runNumber;
-    reportWritten_ = false;
-    refitPlot_ = true;
-}
-
-void App::leave_run_view() {
-    if (!tableResult_) {
-        batch_.selected = -1;
-        return;
-    }
-    analysis_ = std::move(tableResult_->analysis);
-    analysisRun_ = tableResult_->run;
-    tableResult_.reset();
-    batch_.selected = -1;
-    reportWritten_ = false;
-    refitPlot_ = true;
-}
-
-void App::refit_runs() {
-    const int shown = batch_.selected;
-    analyse_all_runs();
-    if (shown >= 0 && shown < static_cast<int>(batch_.items.size())) show_batch_item(shown);
-}
-
-void App::edit_shown_run_in_table() {
-    const auto* item = shown_item();
-    if (!item) return;
-    const auto analysis = item->analysis;
-    const int run = item->runNumber;
-    const bool stale = batchStale_;
-    import_.selectedRun = run;
-    if (!load_selected_run_into_table()) return;
-    // The table now holds the run's points, so the run's fit is the table's.
-    const auto undo = std::exchange(notice_, std::nullopt);
-    if (analysis) {
-        analysis_ = analysis;
-        analysisRun_ = run;
-        stale_ = stale;
-        refitPlot_ = true;
-    }
-    notice_ = undo;
 }
 
 // ===========================================================================
@@ -685,12 +859,23 @@ kin::ReportContext App::report_context(std::optional<int> runNumber, bool firstI
     return ctx;
 }
 
+// The report of every run that has results, one after another (one line
+// each in the short format).
 std::string App::current_report_text(bool forFile) const {
-    if (!analysis_) return {};
     const bool first = forFile ? (report_.newFile || !std::filesystem::exists(report_.file) ||
                                   std::filesystem::file_size(report_.file) == 0)
                                : true;
-    return kin::format_report(*analysis_, report_.options, report_context(analysisRun_, first));
+    std::string text;
+    int n = 0;
+    for (int k = 0; k < static_cast<int>(runs_.size()); ++k) {
+        const auto* a = run_analysis(k);
+        if (!a) continue;
+        auto ctx = report_context(report_run_number(k), first && n == 0);
+        ctx.sequenceNumber = report_.nextNumber + n;
+        text += kin::format_report(*a, report_.options, ctx);
+        ++n;
+    }
+    return text;
 }
 
 void App::choose_report_file() {
@@ -698,10 +883,11 @@ void App::choose_report_file() {
                      report_.file.empty() ? default_dir() + "results.txt" : report_.file.string());
 }
 
-bool App::append_report(const kin::Analysis& a, std::optional<int> runNumber) {
+bool App::append_report(const kin::Analysis& a, std::optional<int> runNumber, bool first) {
     std::error_code ec;
     const bool empty = !std::filesystem::exists(report_.file, ec) || std::filesystem::file_size(report_.file, ec) == 0;
-    const auto text = kin::format_report(a, report_.options, report_context(runNumber, report_.newFile || empty));
+    const auto text =
+        kin::format_report(a, report_.options, report_context(runNumber, first && (report_.newFile || empty)));
     if (!kin::write_text_file(report_.file, text, !report_.newFile)) {
         error("Can't write the report file " + report_.file.filename().string() + ".", report_.file.string());
         return false;
@@ -712,7 +898,7 @@ bool App::append_report(const kin::Analysis& a, std::optional<int> runNumber) {
 }
 
 void App::write_report() {
-    if (!analysis_) {
+    if (!any_results()) {
         error("There are no results to report yet: fit the data first (F5).");
         return;
     }
@@ -721,30 +907,19 @@ void App::write_report() {
         choose_report_file();
         return;
     }
-    const int number = report_.nextNumber;
-    if (append_report(*analysis_, analysisRun_)) {
-        report_.status = "Report" + (report_.options.numbering == kin::Numbering::Sequential ? " #" + std::to_string(number) : std::string()) +
-                         " written to " + report_.file.filename().string() + ".";
-        file_written(report_.file);
-        reportWritten_ = true;
-        info(report_.status, report_.file.string());  // seen from any tab (Alt+P)
-    }
-}
-
-void App::write_batch_reports() {
-    if (report_.file.empty()) {
-        pendingReport_ = PendingReport::Batch;
-        choose_report_file();
-        return;
-    }
+    // Every run with results, in order.
     int written = 0;
-    for (const auto& item : batch_.items) {
-        if (!item.analysis) continue;
-        if (!append_report(*item.analysis, item.runNumber)) return;
+    for (int k = 0; k < static_cast<int>(runs_.size()); ++k) {
+        const auto* a = run_analysis(k);
+        if (!a) continue;
+        if (!append_report(*a, report_run_number(k), written == 0)) return;
         ++written;
     }
-    if (written > 0) file_written(report_.file);
-    batch_.status += " " + std::to_string(written) + " report(s) written to " + report_.file.filename().string() + ".";
+    report_.status = (written == 1 ? std::string("Report") : std::to_string(written) + " reports") + " written to " +
+                     report_.file.filename().string() + ".";
+    file_written(report_.file);
+    reportWritten_ = true;
+    info(report_.status, report_.file.string());  // seen from any tab (Alt+P)
 }
 
 void App::copy_report() {
@@ -764,7 +939,8 @@ void App::copy_results() {
     const auto& def = kin::model_def(a.model());
     // A short table with every digit, tab-separated for a spreadsheet.
     std::string t = plain_model_label(a.model(), a.request.params) + ", " + std::to_string(a.fit.n) + " points";
-    if (analysisRun_) t += ", run #" + std::to_string(*analysisRun_);
+    if (runs_.size() > 1) t += ", " + run_label(current_);
+    else if (analysisRun_) t += ", run #" + std::to_string(*analysisRun_);
     t += "\nParameter\tValue\tSD\tRelative SD (%)\tUnit\n";
     const auto rows = a.parameter_rows();
     for (size_t i = 0; i < rows.size(); ++i) {
@@ -792,7 +968,6 @@ void App::copy_results() {
 }
 
 void App::clear_table() {
-    leave_run_view();
     auto before = snapshot_table();
     if (before.rows.empty()) return;  // nothing to clear
     const size_t count = before.rows.size();
@@ -801,7 +976,7 @@ void App::clear_table() {
     dataRun_.reset();
     Notice n;
     n.text = "Cleared the table (" + std::to_string(count) + " row" + (count == 1 ? "" : "s") + ").";
-    n.undo = std::move(before);
+    n.undo = [this, before = std::move(before)]() mutable { restore_table(std::move(before)); };
     n.undoTooltip = "Put the cleared rows back";
     notice_ = std::move(n);  // after set_table, which dismisses messages
 }
@@ -833,6 +1008,10 @@ void App::handle_file_results() {
             case FilePurpose::SaveTable: save_table(path); break;
             case FilePurpose::ImportSpreadsheet: import_spreadsheet(path); break;
             case FilePurpose::ImportMpa: import_mpa(path); break;
+            case FilePurpose::ImportRuns: import_runs_file(path); break;
+            case FilePurpose::ExportRuns: export_runs(path); break;
+            case FilePurpose::OpenAnalysis: open_analysis_file(path); break;
+            case FilePurpose::SaveAnalysis: save_analysis(path); break;
             case FilePurpose::ReportFile: {
                 report_.file = path;
                 std::error_code ec;
@@ -842,7 +1021,6 @@ void App::handle_file_results() {
                 const auto pending = pendingReport_;
                 pendingReport_ = PendingReport::None;
                 if (pending == PendingReport::Current) write_report();
-                else if (pending == PendingReport::Batch) write_batch_reports();
                 break;
             }
         }

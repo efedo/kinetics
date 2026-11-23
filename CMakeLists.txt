@@ -35,6 +35,7 @@ add_library(kinetics_core STATIC
     source/remake/core/import.cpp
     source/remake/core/report.cpp
     source/remake/core/settings.cpp
+    source/remake/core/project.cpp
 )
 target_include_directories(kinetics_core PUBLIC source/remake)
 target_compile_options(kinetics_core PRIVATE ${KINETICS_WARNINGS})
@@ -62,7 +63,7 @@ if(KINETICS_BUILD_APP)
         source/remake/app/ui_data.cpp
         source/remake/app/ui_results.cpp
         source/remake/app/ui_plot.cpp
-        source/remake/app/ui_batch.cpp
+        source/remake/app/ui_runs.cpp
         source/remake/app/ui_dialogs.cpp
         source/remake/app/ui_frame.cpp
         source/remake/app/help_text.cpp

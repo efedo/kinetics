@@ -4,13 +4,18 @@
 // screens become panels and tabs of one window.
 //
 // The window, top to bottom: the menus, a strip with the five steps of the
-// work (Data, Equation, Fit, Results, Report), a banner while a run from an
-// imported file is shown, the left panel (Data, Equation and Fitting options sections)
-// beside the right one (results and graph, standard curve, file runs,
-// report), and a status bar naming the data, or with the latest message.
+// work (Data, Equation, Fit, Results, Report), the left panel (the run
+// shown, then its Data, the Equation and the Fitting options) beside the
+// right one (Runs, Results and Report tabs), and a status bar naming the
+// data, or with the latest message.
+//
+// An analysis is a list of runs (state.hpp), all fitted with the same
+// equation and options. It can be saved to a file and opened again
+// (core/project.hpp).
 
 #include <array>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -36,7 +41,7 @@ class Session;
 namespace app {
 
 // The Results tab holds the parameters, the graph and the residuals.
-enum class Tab { Results, FileRuns, Report };
+enum class Tab { Runs, Results, Report };
 
 class App {
     friend class AppClassicSession;
@@ -49,19 +54,25 @@ public:
     bool frame();
 
     // Command line / test helpers.
+    // A two-column data table into the run shown (Undo in the status bar).
     void open_table_file(const std::filesystem::path& path);
+    // A spreadsheet file of runs, or a saved analysis, in place of every run:
+    // with `ask`, once the user agrees to lose the data there is.
+    void import_runs_file(const std::filesystem::path& path, bool ask = true,
+                          std::optional<kin::ModelId> model = std::nullopt);
+    void open_analysis_file(const std::filesystem::path& path, bool ask = true);
+    // The classic interface's file imports (v3.51's file of runs or MPA file).
     void import_spreadsheet(const std::filesystem::path& path);
     void import_mpa(const std::filesystem::path& path);
     void set_model(kin::ModelId id);
     void request_fit();
-    void analyse_file_runs() { analyse_all_runs(); }
+    void fit_all_runs();
     void write_current_report() { write_report(); }
-    // Reports go to `path`; with batch analysis, one report per run.
+    // Reports go to `path`: Write report adds the report of every fitted run.
     void set_report_file(const std::filesystem::path& path) {
         report_.file = path;
         report_.newFile = !std::filesystem::exists(path);
         report_.nextNumber = report_.options.startNumber;
-        batch_.writeReports = true;
     }
     // help | about | report-options | fit-options | graph | residuals
     void show_window(const std::string& name);
@@ -78,69 +89,76 @@ public:
     void save_settings() const;
     // True once after View > Classic interface was chosen.
     bool take_classic_request() { return std::exchange(classicRequested_, false); }
-    // The classic interface works on the data table, so leave any file run
-    // shown here first.
-    void prepare_for_classic() { leave_run_view(); }
+    // The classic interface works on the data table: the run shown here.
+    void prepare_for_classic() { commit_run(); }
 
 private:
     // ---- actions --------------------------------------------------------
     void fit_now();
     void apply_analysis(kin::AnalysisOutcome outcome, std::optional<int> runNumber);
-    // A setting changed: the table's fit and the file runs' fits are out of date.
+    // A setting changed: every run's fit is out of date.
     void mark_stale() {
         stale_ = true;
-        batchStale_ = true;
+        for (auto& r : runs_)
+            if (r.analysis) r.stale = true;
         notice_.reset();  // a change dismisses the message
     }
     // The table changed. Its fit no longer describes it, so the results go
     // at once, and the report and predictions made from them with it. The
-    // file runs depend on the table only for MPA files, whose concentrations
-    // come from it. The Data section opens to show the table.
+    // Data section opens to show the table.
     void mark_table_changed() {
-        if (!showing_run()) {
-            analysis_.reset();
-            analysisRun_.reset();
-            stale_ = false;
-            reportWritten_ = false;
-            refitPlot_ = true;
-        }
-        if (import_.type == ImportType::Mpa) batchStale_ = true;
+        analysis_.reset();
+        analysisRun_.reset();
+        stale_ = false;
+        runs_[static_cast<size_t>(current_)].error.clear();
+        reportWritten_ = false;
+        refitPlot_ = true;
+        runsAsImported_ = false;  // the file can no longer be read again in its place
         notice_.reset();
         dataOpen_ = true;
     }
     std::vector<kin::Point> table_points(int* invalidCells = nullptr) const;
     void set_table(const std::vector<kin::Point>& pts);
-    void set_table_y(const std::vector<double>& ys);
     void sort_table();
-    bool load_selected_run_into_table();
-    void fit_selected_run();
-    void analyse_all_runs();
-    void show_batch_item(int index);
-    // A table of runs: read its runs from the rows rather than the columns.
-    void set_runs_in_rows(bool rows);
-    // The heading that names a run of the imported file, unless it only
-    // repeats the number; empty otherwise.
-    std::string run_name(int number) const;
 
-    // While a run from the file analysis is shown, both panels show that run
-    // and the table's own fit waits in tableResult_.
-    bool showing_run() const {
-        return tableResult_.has_value() && batch_.selected >= 0 &&
-               batch_.selected < static_cast<int>(batch_.items.size());
-    }
-    const kin::BatchItem* shown_item() const {
-        return showing_run() ? &batch_.items[static_cast<size_t>(batch_.selected)] : nullptr;
-    }
-    // Back to the data table and its own fit.
-    void leave_run_view();
-    // Fit every run again with the current settings, keeping the run shown.
-    void refit_runs();
-    // Copy the run shown into the table (with Undo), keeping its fit.
-    void edit_shown_run_in_table();
+    // ---- runs -------------------------------------------------------------
+    // The run shown, runs_[current_], is worked on in rows_, analysis_,
+    // stale_ and dataSource_; its entry in runs_ is brought up to date by
+    // commit_run(), which everything that reads all the runs calls first.
+    void commit_run();
+    void load_run(int k);
+    void select_run(int k);
+    void add_run();
+    void delete_run(int k);
+    void fit_run(int k);
+    // "Run 2", or "Run 2: WT" when the run has a name of its own.
+    std::string run_label(int k) const;
+    // A run's name unless it only repeats its number ("2", "Run 2").
+    std::string run_own_name(int k) const;
+    int run_point_count(int k) const;
+    const kin::Analysis* run_analysis(int k) const;
+    bool run_stale(int k) const;
+    bool any_results() const;
+    // Whether any run holds a number (replacing them all then needs a yes).
+    bool have_data() const;
+    // The run number a report gives: the run's when there are several.
+    std::optional<int> report_run_number(int k) const;
+    void replace_runs(std::vector<Run> runs);
+    // Replacing every run cannot be undone, so ask first when there is
+    // data; otherwise just do it.
+    void confirm_replace(const std::string& what, std::function<void()> action);
+    void new_analysis();
+    void save_analysis(const std::filesystem::path& path);
+    // File > Save analysis: to its file, or asking for one the first time.
+    void save_analysis_or_ask();
+    void ask_analysis_file();
+    void export_runs(const std::filesystem::path& path);
+    // The runs just imported, read again from the file with other options
+    // (runs in rows; negative values missing), until they are edited.
+    void reread_runs_file();
 
     void write_report();
-    void write_batch_reports();
-    bool append_report(const kin::Analysis& a, std::optional<int> runNumber);
+    bool append_report(const kin::Analysis& a, std::optional<int> runNumber, bool first);
     void choose_report_file();
     void copy_report();
     std::string current_report_text(bool forFile) const;
@@ -160,23 +178,22 @@ private:
     // File > Report options (Alt+O): on the Report tab once there are
     // results, otherwise in a dialog.
     void show_report_options() {
-        if (analysis_) {
+        if (any_results()) {
             requestedTab_ = Tab::Report;
             openReportSection_ = true;
         } else {
             openReportOptions_ = true;
         }
     }
-    enum class Example { MichaelisMenten, Arrhenius, SpreadsheetRuns, RunsInColumns, MpaPlate };
+    enum class Example { MichaelisMenten, Arrhenius, SpreadsheetRuns, RunsInColumns };
     void open_example(Example e);
     // Whether all the fit settings (Fitting options) are at their defaults.
     bool fit_settings_are_default() const;
     // v0 is fixed and the table has a point at zero concentration: that velocity is used.
     bool v0_measured() const;
-    // The results shown were fitted to data or settings that have changed since.
-    bool results_stale() const;
-    // Forget the imported file (the File runs tab's close button).
-    void close_import();
+    // The results shown were fitted with an equation or settings that have
+    // changed since.
+    bool results_stale() const { return analysis_ && stale_; }
     std::string report_file_tooltip() const;
     void step_text_scale(int direction);
     void load_settings();
@@ -198,7 +215,6 @@ private:
     void draw_menu_bar();
     void handle_shortcuts();
     void draw_step_strip();
-    void draw_run_banner();
     void draw_panels(const ImVec2& size);
     void draw_status_bar(float height);
     // A "(?)" at the right of the current line that opens a help topic.
@@ -206,6 +222,8 @@ private:
 
     // ---- UI: left panel (ui_data.cpp) -----------------------------------
     void draw_left_panel();
+    // The run shown: its number and name, with buttons to step through the runs.
+    void draw_run_heading();
     // The left panel's three sections, in the order of the steps; each folds.
     enum class Section { Data, Equation, Fit };
     // A section's heading. It opens the section, and scrolls it into view,
@@ -217,7 +235,6 @@ private:
     void draw_fit_section();
     void draw_fit_settings();
     void draw_data_table();
-    void draw_run_points();  // the shown file run, read-only
 
     // ---- UI: right panel (ui_results.cpp, ui_plot.cpp, ui_batch.cpp) -----
     void draw_right_panel();
@@ -240,7 +257,7 @@ private:
     // The Calculate box's answers as points on the curve, in the data's
     // units: [0] the X read off for the entered Y, [1] the Y for the entered X.
     std::array<std::optional<std::pair<double, double>>, 2> prediction_points(const kin::Analysis& a) const;
-    void draw_file_runs_tab();
+    void draw_runs_tab();
     void draw_report_tab();
 
     // ---- UI: dialogs (ui_dialogs.cpp) -----------------------------------
@@ -251,6 +268,7 @@ private:
     std::string report_options_summary() const;
     void draw_help_window();
     void draw_about_dialog();
+    void draw_replace_dialog();
 
     // ---- state ----------------------------------------------------------
     std::filesystem::path prefDir_;
@@ -273,22 +291,35 @@ private:
     float leftWidthEm_ = 26.0f;       // the left panel's width, in font heights (saved)
     bool firstFrame_ = true;
 
+    // The runs; the one shown is worked on in the members below.
+    std::vector<Run> runs_ = std::vector<Run>(1, Run{"Run 1", {}, "Entered by hand", {}, false, {}});
+    int current_ = 0;
+    std::filesystem::path analysisPath_;  // the analysis file, once saved or opened
+    // The file the runs were read from, with what is needed to read it again
+    // differently while the runs are as read (runsAsImported_).
+    std::filesystem::path runsFile_;
+    std::string runsText_;
+    bool runsTable_ = false;  // a table of runs, rather than v3.51's format
+    bool runsInRows_ = false;
+    bool runsAsImported_ = false;
+
+    // The run shown.
     std::vector<DataRow> rows_;
     std::string dataSource_ = "Entered by hand";
-    std::optional<int> dataRun_;   // run number when the table came from a file
+    std::optional<int> dataRun_;   // the classic interface's file run, when it loaded one
     std::filesystem::path tablePath_;
     std::string xUnit_, yUnit_;
 
     std::optional<kin::Analysis> analysis_;  // the results shown
-    std::optional<int> analysisRun_;
-    bool stale_ = false;       // the table's fit is out of date
-    bool batchStale_ = false;  // the file runs' fits are out of date
-    bool reportWritten_ = false;  // a report of the results shown was written
-    struct TableResult {
-        std::optional<kin::Analysis> analysis;
-        std::optional<int> run;
-    };
-    std::optional<TableResult> tableResult_;  // the table's fit, while a file run is shown
+    std::optional<int> analysisRun_;  // the classic interface's file run, when it fitted one
+    bool stale_ = false;       // the equation or settings changed since the fit
+    bool reportWritten_ = false;  // a report of the results was written
+
+    // Replacing all the runs, once the user agrees.
+    std::function<void()> pendingReplace_;
+    std::string replaceWhat_;
+    bool openReplace_ = false;
+    int renameRun_ = -1;  // the run whose name is being edited in the Runs tab
 
     kin::PlotType plotType_ = kin::PlotType::Normal;
     kin::PlotOptions plotOptions_;
@@ -300,8 +331,8 @@ private:
     bool openResiduals_ = false;
     int residualScrollFrames_ = 0;  // scroll to the opened residuals once the layout has settled
 
-    ImportState import_;
-    BatchState batch_;
+    ImportState import_;  // the classic interface's imported file
+    BatchState batch_;    // and its results
     ReportState report_;
     // The Calculate box's inputs, as typed: a Y to read X off the curve
     // for, and an X to read Y for. Blank for none.
@@ -327,7 +358,7 @@ private:
         bool isError = false;
         std::string text;
         std::string detail;  // a tooltip, e.g. the full path of a file named in the text
-        std::optional<TableSnapshot> undo;
+        std::function<void()> undo;  // puts back what the action changed
         std::string undoTooltip;
     };
     std::optional<Notice> notice_;
@@ -337,7 +368,7 @@ private:
     bool openAbout_ = false;
     bool showHelp_ = false;
     int helpTopic_ = 0;
-    enum class PendingReport { None, Current, Batch };
+    enum class PendingReport { None, Current };
     PendingReport pendingReport_ = PendingReport::None;
     bool focusModel_ = false;
     bool focusTable_ = false;

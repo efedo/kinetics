@@ -18,7 +18,19 @@ struct SDL_Window;
 
 namespace app {
 
-enum class FilePurpose { OpenTable, SaveTable, ImportSpreadsheet, ImportMpa, ReportFile };
+// ImportSpreadsheet and ImportMpa are the classic interface's; the modern one
+// imports runs (ImportRuns) and exports them as a spreadsheet (ExportRuns).
+enum class FilePurpose {
+    OpenTable,
+    SaveTable,
+    ImportSpreadsheet,
+    ImportMpa,
+    ReportFile,
+    ImportRuns,
+    ExportRuns,
+    OpenAnalysis,
+    SaveAnalysis,
+};
 
 struct FileDialogResult {
     FilePurpose purpose;

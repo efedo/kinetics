@@ -1,11 +1,11 @@
-// Left panel: the Data, Equation and Fitting options sections (v3.51 Edit menu: "enter/
-// edit Data" and "edit equation Type").
+// Left panel: the run shown, then the Data, Equation and Fitting options
+// sections (v3.51 Edit menu: "enter/edit Data" and "edit equation Type").
 //
 // Top to bottom in the order of the steps in the strip above: enter the
-// data, choose the equation, fit. Each section folds. The Fitting options section holds
-// the parameter and minimisation settings, which most fits never need and
-// so start folded, with the Fit button below them. While a run from an
-// imported file is shown, its points take the table's place, read-only.
+// data, choose the equation, fit. Each section folds. The Fitting options
+// hold the parameter and minimisation settings, which most fits never need
+// and so start folded, with the Fit button below them. Every run is edited
+// in the same table; the heading at the top says which run it is.
 
 #include <imgui.h>
 #include <imgui_stdlib.h>
@@ -106,16 +106,77 @@ const char* equation_name(kin::ModelId id) { return equation_info(id).name; }
 
 void App::draw_left_panel() {
     // Alt+D and Alt+T put the cursor in a section, which must be open.
-    if (focusTable_ && !showing_run()) dataOpen_ = true;
+    if (focusTable_) dataOpen_ = true;
     if (focusModel_) equationOpen_ = true;
-    if (showing_run()) draw_run_points();
-    else draw_data_table();
+    draw_run_heading();
+    draw_data_table();
     // The table fills the height left over by what follows it, measured here
     // and used on the next frame.
     const float footerTop = ImGui::GetCursorPosY();
     draw_model_section();
     draw_fit_section();
     leftFooterHeight_ = ImGui::GetCursorPosY() - footerTop;
+}
+
+void App::draw_run_heading() {
+    const int n = static_cast<int>(runs_.size());
+    const std::string own = run_own_name(current_);
+    const std::string title = "Run " + std::to_string(current_ + 1) + (n > 1 ? " of " + std::to_string(n) : "") +
+                              (own.empty() ? "" : ": " + own);
+    const ImGuiStyle& st = ImGui::GetStyle();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+
+    // The title, which lists the runs to choose from when clicked.
+    push_heading_font();
+    const float h = ImGui::GetFrameHeight();
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const float right = p.x + ImGui::GetContentRegionAvail().x;
+    const float maxW = std::max(0.0f, ImGui::GetContentRegionAvail().x - ImGui::GetFontSize() * 7.0f);
+    const std::string shown = fit_text(title, maxW);
+    const ImVec2 ts = ImGui::CalcTextSize(shown.c_str());
+    const ImVec2 size(ts.x + st.FramePadding.x * 2.0f, h);
+    ImGui::AlignTextToFramePadding();
+    const bool clicked = ImGui::InvisibleButton("##runtitle", size);
+    const bool hovered = ImGui::IsItemHovered();
+    if (hovered && n > 1)
+        dl->AddRectFilled(p, ImVec2(p.x + size.x, p.y + size.y), ImGui::GetColorU32(ImGuiCol_ButtonHovered),
+                          st.FrameRounding);
+    dl->AddText(ImVec2(p.x + st.FramePadding.x, p.y + std::round((h - ts.y) * 0.5f)), ImGui::GetColorU32(ImGuiCol_Text),
+                shown.c_str());
+    ImGui::PopFont();
+    item_tooltip(n > 1 ? title + ". Click to choose another run; the Runs tab lists them all (Alt+W)."
+                       : title + ". Add runs here or on the Runs tab, to fit several with the same equation.");
+    if (clicked && n > 1) ImGui::OpenPopup("##runlist");
+    if (ImGui::BeginPopup("##runlist")) {
+        for (int k = 0; k < n; ++k) {
+            ImGui::PushID(k);
+            if (ImGui::Selectable(run_label(k).c_str(), k == current_) && k != current_) select_run(k);
+            ImGui::PopID();
+        }
+        ImGui::EndPopup();
+    }
+
+    // Step through the runs, or add one.
+    ImGui::SameLine();
+    ImGui::BeginDisabled(current_ <= 0);
+    if (ImGui::ArrowButton("##prevrun", ImGuiDir_Left)) select_run(current_ - 1);
+    ImGui::SetItemTooltip("Previous run");
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(current_ >= n - 1);
+    if (ImGui::ArrowButton("##nextrun", ImGuiDir_Right)) select_run(current_ + 1);
+    ImGui::SetItemTooltip("Next run");
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button("+##addrun", ImVec2(ImGui::GetFrameHeight(), 0.0f))) add_run();
+    ImGui::SetItemTooltip("Add a run, with an empty table");
+    help_link(HelpId::FileData);
+
+    // Underlined like the sections below it.
+    const ImVec4 a = palette().accent;
+    const float lineY = std::round(p.y + h + st.ItemSpacing.y * 0.5f);
+    dl->AddLine(ImVec2(p.x, lineY), ImVec2(right, lineY), ImGui::GetColorU32(ImVec4(a.x, a.y, a.z, 0.6f)), 2.0f);
+    heading_gap();
 }
 
 void App::section_fold_heading(Section s, const char* title, bool& open, bool first) {
@@ -316,31 +377,25 @@ bool play_button(const char* label) {
 
 void App::draw_fit_button() {
     const auto& def = kin::model_def(model_);
-    const bool runs = showing_run();
-    // While the file's runs are shown and up to date there is nothing to fit.
-    const bool haveData = runs ? batchStale_ : !kin::clean_data(table_points()).empty();
+    const bool haveData = !kin::clean_data(table_points()).empty();
 
     ImGui::Spacing();
     ImGui::BeginDisabled(!haveData);
-    const char* label = runs ? "Fit all runs again (F5)" : results_stale() ? "Fit again (F5)" : "Fit (F5)";
+    const char* label = results_stale() ? "Fit again (F5)" : "Fit (F5)";
     if (play_button(label)) request_fit();
     ImGui::EndDisabled();
-    if (runs)
-        item_tooltip(batchStale_ ? "Fit every run of " + import_.path.filename().string() +
-                                       " with the current equation and options (F5)"
-                                 : std::string("The runs are fitted with the current settings. Change the equation "
-                                               "or the options to fit them again, or press Back to my table to fit "
-                                               "your own data."));
-    else if (!haveData)
+    if (!haveData)
         item_tooltip("Enter data first: type or paste " + std::string(def.xName) + " and " + std::string(def.yName) +
                      " values in the table above.");
     else
-        ImGui::SetItemTooltip(results_stale() ? "The equation or settings have changed: fit again to update the results"
-                                              : "Fit the equation to the data in the table");
+        item_tooltip(std::string(results_stale() ? "The equation or settings have changed: fit again to update the "
+                                                   "results"
+                                                 : "Fit the equation to this run's data") +
+                     (runs_.size() > 1 ? ". Fit all runs, on the Runs tab, fits every run." : "."));
 
     // Out-of-date results are flagged on the right; here, only a fit that
     // did not converge needs a word.
-    if (!analysis_ || runs || stale_) return;
+    if (!analysis_ || stale_) return;
     if (!analysis_->linear && analysis_->fit.status != kin::FitStatus::Converged)
         warning_text("The last fit did not converge: see the Results tab.", analysis_->fit.message);
 }
@@ -434,14 +489,14 @@ void App::draw_data_table() {
     const bool arrhenius = def.family == kin::Family::Arrhenius;
 
     // The heading, with the table's buttons beside it.
-    section_fold_heading(Section::Data, "Data", dataOpen_, true);
+    section_fold_heading(Section::Data, "Data", dataOpen_);
     struct Btn {
         const char* label;
         const char* tip;
     };
     const Btn buttons[] = {{"Paste", "Paste two columns copied from a spreadsheet"},
-                           {"Open...", "Open a data table (Ctrl+O)"},
-                           {"Save...", "Save the table as a comma-separated file (Ctrl+S)"},
+                           {"Open...", "Read a two-column data table into this run (Undo in the status bar)"},
+                           {"Save...", "Save this run's data as a comma-separated file"},
                            {"Clear", "Empty the table. The status bar then offers Undo."}};
     // Beside the heading while they fit (leaving room for the help link),
     // then on the next line.
@@ -592,55 +647,6 @@ void App::draw_data_table() {
         rows_.erase(rows_.begin() + deleteAt);
         mark_table_changed();
     }
-}
-
-void App::draw_run_points() {
-    const auto* item = shown_item();
-    if (!item) return;
-    const auto& def = kin::model_def(item->analysis ? item->analysis->model() : model_);
-    const bool sheet = import_.type == ImportType::Spreadsheet;
-    section_fold_heading(Section::Data, "Data", dataOpen_, true);
-    ImGui::SameLine();
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextDisabled("%s #%d, read-only", sheet ? "run" : "dataset", item->runNumber);
-    help_link(HelpId::FileData);
-    heading_gap();
-    if (!dataOpen_) return;
-
-    // The points the run was fitted to, or for a run that failed, its points
-    // as the file gives them.
-    std::vector<kin::Point> pts;
-    if (item->analysis) pts = item->analysis->data;
-    else if (sheet && import_.sheet)
-        if (const auto* run = import_.sheet->find_run(item->runNumber)) pts = import_.sheet->points(*run, import_.negativeIsMissing);
-
-    const ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInner | ImGuiTableFlags_ScrollY |
-                                  ImGuiTableFlags_BordersOuter;
-    const float noteH = ImGui::GetTextLineHeightWithSpacing() * 2.0f;
-    if (ImGui::BeginTable("##runpoints", 3, flags, ImVec2(table_width(), table_height(leftFooterHeight_ + noteH)))) {
-        ImGui::TableSetupScrollFreeze(0, 1);
-        ImGui::TableSetupColumn("#", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 2.5f);
-        ImGui::TableSetupColumn(x_heading(def.id).c_str(), ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn(y_heading(def.id).c_str(), ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableHeadersRow();
-        for (size_t i = 0; i < pts.size(); ++i) {
-            ImGui::TableNextRow();
-            // The point under the mouse on the graph (the run's own data).
-            const bool hovered = item->analysis && static_cast<int>(i) == hoveredPoint_;
-            if (hovered) highlight_row();
-            ImGui::TableNextColumn();
-            ImGui::TextDisabled("%zu", i + 1);
-            if (hovered && !ImGui::IsItemVisible()) ImGui::SetScrollHereY(0.5f);
-            ImGui::TableNextColumn();
-            ImGui::TextUnformatted(number_text(pts[i].x).c_str());
-            ImGui::TableNextColumn();
-            ImGui::TextUnformatted(number_text(pts[i].y).c_str());
-        }
-        ImGui::EndTable();
-    }
-    ImGui::PushStyleColor(ImGuiCol_Text, palette().textDim);
-    ImGui::TextWrapped("To change these points, press Edit this run in the table, above.");
-    ImGui::PopStyleColor();
 }
 
 }  // namespace app

@@ -316,21 +316,11 @@ void draw_verdict(const VerdictLine& v) {
 }  // namespace
 
 void App::draw_right_panel() {
-    const bool haveImport = import_.type != ImportType::None;
-    // Before anything is fitted or imported, a getting-started page instead
-    // of tabs that would all be empty.
-    if (!analysis_ && !haveImport) {
-        requestedTab_.reset();
-        if (ImGui::BeginChild("##start")) draw_getting_started();
-        ImGui::EndChild();
-        return;
-    }
-    // Results from data that have since changed are greyed out, with a note
-    // saying why.
-    // (For the file's runs, the banner above says so.)
-    // (A change to the data clears the results instead.)
+    // Results fitted with an equation or settings that have changed since
+    // are greyed out, with a note saying why. (A change to the data clears
+    // the results instead.)
     const bool stale = results_stale();
-    if (stale && !showing_run()) {
+    if (stale) {
         warning_text("The equation or fit settings have changed since this fit. Press Fit (F5) to update the "
                      "results.",
                      "");
@@ -340,7 +330,7 @@ void App::draw_right_panel() {
     auto tab = [&](const char* label, Tab t, void (App::*fn)(), bool* open = nullptr) {
         const ImGuiTabItemFlags f = (requestedTab_ && *requestedTab_ == t) ? ImGuiTabItemFlags_SetSelected : 0;
         if (ImGui::BeginTabItem(label, open, f)) {
-            const bool dim = stale && t != Tab::FileRuns;
+            const bool dim = stale && t == Tab::Results;
             if (dim) ImGui::PushStyleVar(ImGuiStyleVar_Alpha, kStaleAlpha);
             if (ImGui::BeginChild("##tabcontent", ImVec2(0, 0), ImGuiChildFlags_None)) (this->*fn)();
             ImGui::EndChild();
@@ -348,16 +338,14 @@ void App::draw_right_panel() {
             ImGui::EndTabItem();
         }
     };
-    // Each tab appears once it has something to show.
-    const bool haveFit = analysis_.has_value();
-    bool keepFile = true;
-    // An imported file's runs come first: the work with a file starts there.
-    if (haveImport) tab("File runs", Tab::FileRuns, &App::draw_file_runs_tab, &keepFile);
+    // The runs first, where the work with several of them starts; the
+    // results of the run shown (or how to get started); and the report once
+    // there are results to report.
+    tab("Runs", Tab::Runs, &App::draw_runs_tab);
     tab("Results", Tab::Results, &App::draw_results_tab);
-    if (haveFit) tab("Report", Tab::Report, &App::draw_report_tab);
+    if (any_results()) tab("Report", Tab::Report, &App::draw_report_tab);
     requestedTab_.reset();
     ImGui::EndTabBar();
-    if (!keepFile) close_import();  // the tab's close button
 }
 
 void App::draw_getting_started() {
@@ -438,9 +426,9 @@ void App::draw_getting_started() {
 
     ImGui::Dummy(ImVec2(0.0f, fs * 1.5f));
     ImGui::TextDisabled("Have a file with many runs?");
-    if (ImGui::SmallButton("Import spreadsheet file...")) show_open_dialog(FilePurpose::ImportSpreadsheet, default_dir());
+    if (ImGui::SmallButton("Import spreadsheet of runs...")) show_open_dialog(FilePurpose::ImportRuns, default_dir());
     item_tooltip("A table saved as CSV or text, with the concentrations in the first column and a run in each "
-                 "further column. Help > Using file data describes the formats.");
+                 "further column. Help > Runs and files describes the formats. Or add runs by hand on the Runs tab.");
     same_line_if_fits(button_width("Try an example file"));
     if (ImGui::SmallButton("Try an example file")) open_example(Example::RunsInColumns);
     ImGui::SetItemTooltip("Four runs of an allosteric enzyme, one per column");
@@ -455,17 +443,15 @@ void App::draw_getting_started() {
 void App::draw_results_tab() {
     const float fs = ImGui::GetFontSize();
     if (!analysis_) {
-        if (const auto* item = shown_item()) {
-            const bool sheet = import_.type == ImportType::Spreadsheet;
+        // Why the run's last fit failed, then how to get started.
+        const auto& failure = runs_[static_cast<size_t>(current_)].error;
+        if (!failure.empty()) {
+            ImGui::Spacing();
             ImGui::PushStyleColor(ImGuiCol_Text, palette().bad);
-            ImGui::TextWrapped("%s #%d could not be fitted: %s", sheet ? "Run" : "Dataset", item->runNumber,
-                               item->error.c_str());
+            ImGui::TextWrapped("%s could not be fitted: %s", run_label(current_).c_str(), failure.c_str());
             ImGui::PopStyleColor();
-        } else {
-            // Only reachable with an imported file: the other ways in need a fit.
-            ImGui::TextDisabled("No results yet. Analyse the runs on the File runs tab, or press Fit (F5) to fit the "
-                                "data table.");
         }
+        draw_getting_started();
         return;
     }
     const auto& a = *analysis_;
@@ -876,7 +862,7 @@ void App::draw_prediction_box(const kin::Analysis& a, float width) {
 }
 
 void App::draw_report_tab() {
-    if (!analysis_) {
+    if (!any_results()) {
         no_results_text();
         return;
     }
@@ -884,7 +870,7 @@ void App::draw_report_tab() {
     item_tooltip(report_file_tooltip());
     ImGui::SameLine();
     if (ImGui::Button("Copy to clipboard")) copy_report();
-    ImGui::SetItemTooltip("Copy this report, with all digits, to the clipboard");
+    ImGui::SetItemTooltip("Copy the report, with all digits, to the clipboard");
     if (!report_.status.empty()) {
         ImGui::SameLine();
         ImGui::AlignTextToFramePadding();

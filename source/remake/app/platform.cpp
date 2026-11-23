@@ -61,14 +61,20 @@ const SDL_DialogFileFilter kSpreadsheetFilters[] = {{"Spreadsheet files (*.csv, 
                                                     {"All files", "*"}};
 const SDL_DialogFileFilter kMpaFilters[] = {{"MPA output (*.txt, *.prn, *.dat)", "txt;prn;dat"}, {"All files", "*"}};
 const SDL_DialogFileFilter kReportFilters[] = {{"Reports (*.txt, *.prn, *.csv)", "txt;prn;csv"}, {"All files", "*"}};
+const SDL_DialogFileFilter kAnalysisFilters[] = {{"Kinetics analyses (*.kinetics)", "kinetics"}, {"All files", "*"}};
+const SDL_DialogFileFilter kRunsFilters[] = {{"Spreadsheet (*.csv)", "csv"}, {"All files", "*"}};
 
 const SDL_DialogFileFilter* filters_for(FilePurpose p) {
     switch (p) {
         case FilePurpose::OpenTable:
         case FilePurpose::SaveTable: return kTableFilters;
-        case FilePurpose::ImportSpreadsheet: return kSpreadsheetFilters;
+        case FilePurpose::ImportSpreadsheet:
+        case FilePurpose::ImportRuns: return kSpreadsheetFilters;
+        case FilePurpose::ExportRuns: return kRunsFilters;
         case FilePurpose::ImportMpa: return kMpaFilters;
         case FilePurpose::ReportFile: return kReportFilters;
+        case FilePurpose::OpenAnalysis:
+        case FilePurpose::SaveAnalysis: return kAnalysisFilters;
     }
     return kTableFilters;
 }
@@ -197,7 +203,9 @@ namespace {
 const char* accept_for(FilePurpose p) {
     switch (p) {
         case FilePurpose::OpenTable: return ".csv,.txt,text/plain,text/csv";
-        case FilePurpose::ImportSpreadsheet: return ".csv,.tsv,.txt,.prn,text/csv,text/plain";
+        case FilePurpose::ImportSpreadsheet:
+        case FilePurpose::ImportRuns: return ".csv,.tsv,.txt,.prn,text/csv,text/plain";
+        case FilePurpose::OpenAnalysis: return ".kinetics,.txt,text/plain";
         case FilePurpose::ImportMpa: return ".txt,.prn,.dat,text/plain";
         default: return "";
     }
@@ -232,7 +240,11 @@ void show_open_dialog(FilePurpose purpose, const std::string&) { js_open_file(st
 // /downloads and offered as a download by file_written().
 void show_save_dialog(FilePurpose purpose, const std::string& defaultLocation) {
     std::string name = std::filesystem::path(defaultLocation).filename().string();
-    if (name.empty()) name = purpose == FilePurpose::ReportFile ? "results.txt" : "data.csv";
+    if (name.empty())
+        name = purpose == FilePurpose::ReportFile     ? "results.txt"
+               : purpose == FilePurpose::SaveAnalysis ? "analysis.kinetics"
+               : purpose == FilePurpose::ExportRuns   ? "runs.csv"
+                                                      : "data.csv";
     std::error_code ec;
     std::filesystem::create_directories("/downloads", ec);
     push_result(purpose, "/downloads/" + name);

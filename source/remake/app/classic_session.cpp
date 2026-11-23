@@ -1,5 +1,7 @@
 // The App's implementation of classic::Session: the classic interface reads
-// and changes the same session as the modern one.
+// and changes the same session as the modern one. Its data table is the
+// modern interface's run shown; the files it imports, and the runs it fits
+// from them, stay its own (v3.51's way of working through a file).
 
 #include <cmath>
 
@@ -31,6 +33,7 @@ public:
         a_.set_table(pts);
         a_.dataSource_ = source;
         a_.dataRun_ = run;
+        a_.commit_run();
     }
 
     std::string table_source() const override { return a_.dataSource_; }
@@ -41,19 +44,14 @@ public:
     void set_result(kin::Analysis analysis, std::optional<int> run) override {
         kin::AnalysisOutcome outcome;
         outcome.analysis = std::move(analysis);
-        a_.leave_run_view();
         a_.apply_analysis(std::move(outcome), run);
+        a_.analysisRun_ = run;
+        a_.commit_run();
     }
 
-    // The classic interface works on the table: while the modern one shows a
-    // file run, the table's own fit is the result.
-    const kin::Analysis* result() const override {
-        if (a_.tableResult_) return a_.tableResult_->analysis ? &*a_.tableResult_->analysis : nullptr;
-        return a_.analysis_ ? &*a_.analysis_ : nullptr;
-    }
-    std::optional<int> result_run() const override {
-        return a_.tableResult_ ? a_.tableResult_->run : a_.analysisRun_;
-    }
+    // The result of the modern interface's run shown, the classic table.
+    const kin::Analysis* result() const override { return a_.analysis_ ? &*a_.analysis_ : nullptr; }
+    std::optional<int> result_run() const override { return a_.analysisRun_; }
     bool result_stale() const override { return a_.stale_; }
 
     ImportState& import_state() override { return a_.import_; }

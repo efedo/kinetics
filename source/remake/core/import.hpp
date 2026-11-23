@@ -66,6 +66,18 @@ SpreadsheetParse parse_run_table(std::string_view text, bool runsInRows = false)
 // than a table of runs.
 bool is_v351_spreadsheet(std::string_view text);
 
+// A table of runs, as parse_run_table reads it, for saving as a CSV file: a
+// heading row with the runs' names, then the concentrations in the first
+// column and each run's values in its own column. Runs measured at
+// different concentrations, or with replicates, get as many rows for a
+// concentration as the run with most points there; the other cells are
+// left empty. Points without both numbers are left out.
+struct NamedPoints {
+    std::string name;
+    std::vector<Point> points;
+};
+std::string format_run_table(const std::vector<NamedPoints>& runs, std::string_view xHeading);
+
 // ---- MPA file (MicroPlate Analysis program) -------------------------------
 //
 // Three header lines, then one "cell, slope" record per line. Dataset k

@@ -20,6 +20,19 @@ struct DataRow {
     std::string y;
 };
 
+// One run of an analysis in the modern interface: its data table and its
+// fit. An analysis holds one or more runs, one of them shown at a time.
+struct Run {
+    std::string name;                       // "Run 1", or the heading it had in a file
+    std::vector<DataRow> rows;
+    std::string source = "Entered by hand";  // where its data came from
+    std::optional<kin::Analysis> analysis;   // its results
+    bool stale = false;                      // the equation or settings changed since the fit
+    std::string error;                       // why its last fit failed
+};
+
+// The classic interface's imported file (v3.51's spreadsheet or MPA file,
+// processed run by run). The modern interface reads files into runs.
 enum class ImportType { None, Spreadsheet, Mpa };
 
 struct ImportState {

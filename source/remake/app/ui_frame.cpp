@@ -106,8 +106,6 @@ bool App::frame() {
     handle_shortcuts();
     // The point the graph found under the mouse last frame, for the table.
     hoveredPoint_ = std::exchange(hoverNext_, -1);
-    // The classic interface may have ended the run view.
-    if (tableResult_ && !showing_run()) leave_run_view();
 
     const ImGuiViewport* vp = ImGui::GetMainViewport();
     const float fs = ImGui::GetFontSize();
@@ -127,7 +125,6 @@ bool App::frame() {
 
     draw_menu_bar();
     draw_step_strip();
-    if (showing_run()) draw_run_banner();
     draw_panels(ImGui::GetContentRegionAvail());
     ImGui::End();
 
@@ -175,30 +172,24 @@ void App::draw_panels(const ImVec2& size) {
 }
 
 // ===========================================================================
-// Step strip, run banner, status bar
+// Step strip, status bar
 // ===========================================================================
 
 void App::draw_step_strip() {
     int invalid = 0;
     const size_t n = kin::clean_data(table_points(&invalid)).size();
-    const auto* item = shown_item();
-    const std::string file = import_.path.filename().string();
-    const bool sheet = import_.type == ImportType::Spreadsheet;
+    const bool several = runs_.size() > 1;
+    const std::string runText = several ? "run " + std::to_string(current_ + 1) + " of " + std::to_string(runs_.size()) + ", " : "";
 
     // 1. Data
     std::string label;
     StepState state;
     std::string tip = "Go to the data table";
-    if (item) {
-        label = std::string("Data: ") + (sheet ? "run #" : "dataset #") + std::to_string(item->runNumber) + " of " + file;
-        state = StepState::Done;
-        tip = "A run from the imported file is shown. Click to go to its points; Back to my table, in the banner, "
-              "returns to your own data.";
-    } else if (n == 0) {
-        label = "Data: none yet";
+    if (n == 0) {
+        label = "Data: " + runText + "none yet";
         state = StepState::Ready;
     } else {
-        label = "Data: " + std::to_string(n) + " point" + (n == 1 ? "" : "s");
+        label = "Data: " + runText + std::to_string(n) + " point" + (n == 1 ? "" : "s");
         state = StepState::Done;
         if (invalid > 0) {
             label += ", " + std::to_string(invalid) + " not a number";
@@ -211,12 +202,12 @@ void App::draw_step_strip() {
     // or writes anything.
     if (step_item(1, label, state, tip)) {
         gotoSection_ = Section::Data;
-        if (!item) focusTable_ = true;
+        focusTable_ = true;
     }
 
     // 2. Equation
     step_chevron();
-    const bool started = n > 0 || analysis_ || item;
+    const bool started = n > 0 || analysis_;
     if (step_item(2, std::string("Equation: ") + equation_name(model_), started ? StepState::Done : StepState::Pending,
                   "Go to the equation (Alt+T)")) {
         gotoSection_ = Section::Equation;
@@ -225,13 +216,13 @@ void App::draw_step_strip() {
 
     // 3. Fit
     step_chevron();
-    const kin::Analysis* shown = item ? (item->analysis ? &*item->analysis : nullptr)
-                                      : (analysis_ ? &*analysis_ : nullptr);
-    const bool outOfDate = item ? batchStale_ : (analysis_ && stale_);
+    const kin::Analysis* shown = analysis_ ? &*analysis_ : nullptr;
+    const bool outOfDate = analysis_ && stale_;
+    const std::string& failure = runs_[static_cast<size_t>(current_)].error;
     if (outOfDate) {
         label = "Fit: out of date";
         state = StepState::Warn;
-    } else if (item && !item->analysis) {
+    } else if (!shown && !failure.empty()) {
         label = "Fit: failed";
         state = StepState::Bad;
     } else if (shown && !shown->linear && shown->fit.status != kin::FitStatus::Converged) {
@@ -260,8 +251,8 @@ void App::draw_step_strip() {
     } else if (outOfDate) {
         label = "Results";
         state = StepState::Pending;
-        tip = "These results are out of date: the data or settings have changed since the fit. Press Fit (F5) to "
-              "update them.";
+        tip = "These results are out of date: the equation or settings have changed since the fit. Press Fit (F5) "
+              "to update them.";
     } else {
         state = verdict_state(*shown, label);
     }
@@ -269,7 +260,7 @@ void App::draw_step_strip() {
 
     // 5. Report
     step_chevron();
-    const bool haveFit = analysis_.has_value();
+    const bool haveFit = any_results();
     if (step_item(5, reportWritten_ ? "Report: written" : "Report",
                   reportWritten_ ? StepState::Done : haveFit ? StepState::Ready : StepState::Pending,
                   haveFit ? "Go to the Report tab, to write or copy a report of the results (Alt+P writes it)"
@@ -278,56 +269,6 @@ void App::draw_step_strip() {
         else show_report_options();
     }
     ImGui::Separator();
-}
-
-void App::draw_run_banner() {
-    const auto* item = shown_item();
-    if (!item) return;
-    const bool sheet = import_.type == ImportType::Spreadsheet;
-    const int count = static_cast<int>(batch_.items.size());
-    const int i = batch_.selected;
-    const ImVec4 a = palette().accent;
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(a.x, a.y, a.z, 0.12f));
-    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(a.x, a.y, a.z, 0.45f));
-    if (ImGui::BeginChild("##runbanner", ImVec2(0, 0),
-                          ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysUseWindowPadding)) {
-        ImGui::AlignTextToFramePadding();
-        const std::string name = run_name(item->runNumber);
-        ImGui::Text("Showing %s #%d%s (%d of %d) from %s", sheet ? "run" : "dataset", item->runNumber,
-                    name.empty() ? "" : (" " + name).c_str(), i + 1, count, import_.path.filename().string().c_str());
-        item_tooltip(import_.path.string());
-        ImGui::SameLine();
-        ImGui::BeginDisabled(i <= 0);
-        if (ImGui::ArrowButton("##prev", ImGuiDir_Left)) show_batch_item(i - 1);
-        ImGui::SetItemTooltip("Previous run");
-        ImGui::EndDisabled();
-        ImGui::SameLine();
-        ImGui::BeginDisabled(i >= count - 1);
-        if (ImGui::ArrowButton("##next", ImGuiDir_Right)) show_batch_item(i + 1);
-        ImGui::SetItemTooltip("Next run");
-        ImGui::EndDisabled();
-        const char* edit = "Edit this run in the table";
-        same_line_if_fits(button_width(edit));
-        if (ImGui::Button(edit)) edit_shown_run_in_table();
-        item_tooltip("Copy this run's points into the data table, replacing what is there (Undo in the status bar), "
-                     "to change or fit them on their own.");
-        const char* back = "Back to my table";
-        same_line_if_fits(button_width(back));
-        if (ImGui::Button(back)) leave_run_view();
-        ImGui::SetItemTooltip("Show your data table and its own results again");
-        if (batchStale_) {
-            ImGui::PushStyleColor(ImGuiCol_Text, palette().warning);
-            ImGui::AlignTextToFramePadding();
-            ImGui::TextUnformatted("The settings have changed since the runs were fitted.");
-            ImGui::PopStyleColor();
-            const char* again = "Fit all runs again";
-            same_line_if_fits(button_width(again));
-            if (primary_button(again)) refit_runs();
-            ImGui::SetItemTooltip("Fit every run with the current equation and options (F5)");
-        }
-    }
-    ImGui::EndChild();
-    ImGui::PopStyleColor(2);
 }
 
 void App::draw_status_bar(float height) {
@@ -354,7 +295,7 @@ void App::draw_status_bar(float height) {
         const float avail = ImGui::GetContentRegionAvail().x;
         if (notice_) {
             bool close = false, undo = false;
-            const bool canUndo = notice_->undo.has_value();
+            const bool canUndo = static_cast<bool>(notice_->undo);
             const float closeW = ImGui::GetFrameHeight();
             const float undoW = canUndo ? button_width("Undo") + st.ItemSpacing.x : 0.0f;
             const float textW = std::max(0.0f, avail - closeW - undoW - st.ItemSpacing.x);
@@ -387,22 +328,19 @@ void App::draw_status_bar(float height) {
             }
             ImGui::SetItemTooltip("Close this message");
             if (undo) {
-                auto snapshot = std::move(*notice_->undo);
-                restore_table(std::move(snapshot));  // closes the message
+                auto putBack = std::move(notice_->undo);
+                notice_.reset();
+                putBack();
             } else if (close) {
                 notice_.reset();
             }
         } else {
             // Where the data came from.
-            std::string where;
-            if (const auto* item = shown_item())
-                where = std::string(import_.type == ImportType::Spreadsheet ? "Run #" : "Dataset #") +
-                        std::to_string(item->runNumber) + " of " + import_.path.filename().string();
-            else {
-                const size_t n = kin::clean_data(table_points()).size();
-                where = n == 0 ? std::string("No data yet")
-                               : dataSource_ + ", " + std::to_string(n) + " point" + (n == 1 ? "" : "s");
-            }
+            std::string where = runs_.size() > 1 ? run_label(current_) + " of " + std::to_string(runs_.size()) + " \xC2\xB7 " : "";
+            const size_t n = kin::clean_data(table_points()).size();
+            where += n == 0 ? std::string("No data yet")
+                            : dataSource_ + ", " + std::to_string(n) + " point" + (n == 1 ? "" : "s");
+            if (!analysisPath_.empty()) where = analysisPath_.filename().string() + " \xC2\xB7 " + where;
             const std::string whereShown = fit_text(where, avail);
             ImGui::AlignTextToFramePadding();
             ImGui::TextDisabled("%s", whereShown.c_str());
@@ -430,19 +368,30 @@ void App::help_link(HelpId id) {
 void App::draw_menu_bar() {
     if (!ImGui::BeginMenuBar()) return;
     const bool haveFit = analysis_.has_value();
-    const bool haveImport = import_.type != ImportType::None;
+    const bool haveReport = any_results();
 
     if (ImGui::BeginMenu("File")) {
-        if (ImGui::MenuItem("Open data table...", "Ctrl+O")) show_open_dialog(FilePurpose::OpenTable, default_dir());
-        if (ImGui::MenuItem("Save data table...", "Ctrl+S"))
-            show_save_dialog(FilePurpose::SaveTable, tablePath_.empty() ? default_dir() + "data.csv" : tablePath_.string());
+        // The analysis as a whole: its runs, equation and options.
+        if (ImGui::MenuItem("New analysis", "Ctrl+N")) new_analysis();
+        if (ImGui::MenuItem("Open analysis...", "Ctrl+O")) show_open_dialog(FilePurpose::OpenAnalysis, default_dir());
+        if (ImGui::MenuItem("Save analysis", "Ctrl+S")) save_analysis_or_ask();
+        if (ImGui::MenuItem("Save analysis as...")) ask_analysis_file();
         ImGui::Separator();
-        // (MPA plate-reader files are read by the classic interface.)
-        if (ImGui::MenuItem("Import spreadsheet file of runs..."))
-            show_open_dialog(FilePurpose::ImportSpreadsheet, default_dir());
+        // Runs from and to spreadsheets (MPA plate-reader files are read by
+        // the classic interface).
+        if (ImGui::MenuItem("Import spreadsheet of runs...")) show_open_dialog(FilePurpose::ImportRuns, default_dir());
         ImGui::SetItemTooltip("A table saved as CSV or text: the concentrations in the first column and a run in "
-                              "each further column (or in rows), or version 3.51's print-to-file format");
-        if (ImGui::MenuItem("Close imported file", nullptr, false, haveImport)) close_import();
+                              "each further column (or in rows), or version 3.51's print-to-file format. It replaces "
+                              "the runs there are.");
+        if (ImGui::MenuItem("Export runs as a spreadsheet..."))
+            show_save_dialog(FilePurpose::ExportRuns, default_dir() + (runsFile_.empty() ? std::string("runs") : runsFile_.stem().string()) + ".csv");
+        ImGui::SetItemTooltip("Every run's data in one CSV file, a run in each column");
+        ImGui::Separator();
+        if (ImGui::MenuItem("Read a data table into this run..."))
+            show_open_dialog(FilePurpose::OpenTable, default_dir());
+        ImGui::SetItemTooltip("Two columns of numbers, in place of the run's data (Undo in the status bar)");
+        if (ImGui::MenuItem("Save this run as a data table..."))
+            show_save_dialog(FilePurpose::SaveTable, tablePath_.empty() ? default_dir() + "data.csv" : tablePath_.string());
         if (ImGui::BeginMenu("Open example")) {
             if (ImGui::MenuItem("Michaelis-Menten data table")) open_example(Example::MichaelisMenten);
             if (ImGui::MenuItem("Arrhenius data table")) open_example(Example::Arrhenius);
@@ -452,8 +401,8 @@ void App::draw_menu_bar() {
         }
         ImGui::Separator();
         if (ImGui::MenuItem("Report options...", "Alt+O")) show_report_options();
-        if (ImGui::MenuItem("Write report", "Alt+P", false, haveFit)) write_report();
-        if (ImGui::MenuItem("Copy report to clipboard", nullptr, false, haveFit)) copy_report();
+        if (ImGui::MenuItem("Write report", "Alt+P", false, haveReport)) write_report();
+        if (ImGui::MenuItem("Copy report to clipboard", nullptr, false, haveReport)) copy_report();
         if (!kIsWeb) {  // a browser tab is closed by the browser
             ImGui::Separator();
             if (ImGui::MenuItem("Quit", "Alt+Q")) quit_ = true;
@@ -470,11 +419,8 @@ void App::draw_menu_bar() {
             ImGui::EndMenu();
         }
         ImGui::SetItemTooltip("Alt+T");
-        if (ImGui::MenuItem("Enter/edit data", "Alt+D")) {
-            leave_run_view();
-            focusTable_ = true;
-        }
-        if (ImGui::MenuItem("Load imported run into table", "Alt+M", false, haveImport)) load_selected_run_into_table();
+        if (ImGui::MenuItem("Enter/edit data", "Alt+D")) focusTable_ = true;
+        if (ImGui::MenuItem("Add a run")) add_run();
         ImGui::Separator();
         if (ImGui::MenuItem("Paste data from clipboard")) paste_table_from_clipboard();
         if (ImGui::MenuItem("Sort data")) sort_table();
@@ -484,13 +430,12 @@ void App::draw_menu_bar() {
     if (ImGui::BeginMenu("Calculate")) {
         const auto m = analysis_ ? analysis_->model() : model_;
         const std::string xName = x_heading(m), yName = y_heading(m);
-        if (ImGui::MenuItem(showing_run() ? "Fit all file runs again" : "Fit table data", "F5 / Alt+R")) request_fit();
-        if (ImGui::MenuItem("Fit the selected file run", "Alt+S", false, haveImport)) fit_selected_run();
-        if (ImGui::MenuItem("Fit all file runs", "Alt+A", false, haveImport)) {
-            requestedTab_ = Tab::FileRuns;
-            analyse_all_runs();
+        if (ImGui::MenuItem("Fit this run", "F5 / Alt+R")) request_fit();
+        if (ImGui::MenuItem("Fit all runs", "Alt+A")) {
+            requestedTab_ = Tab::Runs;
+            fit_all_runs();
         }
-        if (ImGui::MenuItem("Show file runs", "Alt+W", false, haveImport)) requestedTab_ = Tab::FileRuns;
+        if (ImGui::MenuItem("Show the runs", "Alt+W")) requestedTab_ = Tab::Runs;
         ImGui::Separator();
         if (ImGui::MenuItem(("Find " + xName + " for a given " + yName + "...").c_str(), "Alt+X", false, haveFit)) {
             requestedTab_ = Tab::Results;
@@ -523,12 +468,12 @@ void App::draw_menu_bar() {
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("View")) {
-        // The tabs other than Results appear once they have something to show.
+        // The Report tab appears once there are results.
+        if (ImGui::MenuItem("Runs", "Alt+W")) requestedTab_ = Tab::Runs;
         if (ImGui::MenuItem("Results", "Alt+L")) requestedTab_ = Tab::Results;
         if (ImGui::MenuItem("Graph", "Alt+G", false, haveFit)) show_window("graph");
         if (ImGui::MenuItem("Residuals", "Alt+I", false, haveFit)) show_window("residuals");
-        if (ImGui::MenuItem("File runs", nullptr, false, haveImport)) requestedTab_ = Tab::FileRuns;
-        if (ImGui::MenuItem("Report", nullptr, false, haveFit)) requestedTab_ = Tab::Report;
+        if (ImGui::MenuItem("Report", nullptr, false, haveReport)) requestedTab_ = Tab::Report;
         ImGui::Separator();
         if (ImGui::MenuItem("Classic interface (v3.51)", "Ctrl+F12")) classicRequested_ = true;
         if (ImGui::BeginMenu("Text size")) {
@@ -572,23 +517,17 @@ void App::draw_menu_bar() {
 void App::handle_shortcuts() {
     using namespace ImGui;
     constexpr ImGuiInputFlags g = ImGuiInputFlags_RouteGlobal;
-    const bool haveImport = import_.type != ImportType::None;
     if (Shortcut(ImGuiMod_Alt | ImGuiKey_Q, g) && !kIsWeb) quit_ = true;
     if (Shortcut(ImGuiMod_Alt | ImGuiKey_O, g)) show_report_options();
     if (Shortcut(ImGuiMod_Alt | ImGuiKey_P, g)) write_report();
     if (Shortcut(ImGuiMod_Alt | ImGuiKey_T, g)) focusModel_ = true;
-    if (Shortcut(ImGuiMod_Alt | ImGuiKey_D, g)) {
-        leave_run_view();
-        focusTable_ = true;
-    }
-    if (Shortcut(ImGuiMod_Alt | ImGuiKey_M, g)) load_selected_run_into_table();
+    if (Shortcut(ImGuiMod_Alt | ImGuiKey_D, g)) focusTable_ = true;
     if (Shortcut(ImGuiMod_Alt | ImGuiKey_R, g) || Shortcut(ImGuiKey_F5, g)) request_fit();
-    if (Shortcut(ImGuiMod_Alt | ImGuiKey_S, g)) fit_selected_run();
-    if (Shortcut(ImGuiMod_Alt | ImGuiKey_A, g) && haveImport) {
-        requestedTab_ = Tab::FileRuns;
-        analyse_all_runs();
+    if (Shortcut(ImGuiMod_Alt | ImGuiKey_A, g)) {
+        requestedTab_ = Tab::Runs;
+        fit_all_runs();
     }
-    if (Shortcut(ImGuiMod_Alt | ImGuiKey_W, g)) requestedTab_ = Tab::FileRuns;
+    if (Shortcut(ImGuiMod_Alt | ImGuiKey_W, g)) requestedTab_ = Tab::Runs;
     if (Shortcut(ImGuiMod_Alt | ImGuiKey_X, g)) {
         requestedTab_ = Tab::Results;
         focusStdX_ = true;
@@ -601,9 +540,9 @@ void App::handle_shortcuts() {
     if (Shortcut(ImGuiMod_Alt | ImGuiKey_G, g)) show_window("graph");
     if (Shortcut(ImGuiMod_Alt | ImGuiKey_I, g)) show_window("residuals");
     if (Shortcut(ImGuiMod_Alt | ImGuiKey_H, g) || Shortcut(ImGuiKey_F1, g)) open_help(HelpId::GettingStarted);
-    if (Shortcut(ImGuiMod_Ctrl | ImGuiKey_O, g)) show_open_dialog(FilePurpose::OpenTable, default_dir());
-    if (Shortcut(ImGuiMod_Ctrl | ImGuiKey_S, g))
-        show_save_dialog(FilePurpose::SaveTable, tablePath_.empty() ? default_dir() + "data.csv" : tablePath_.string());
+    if (Shortcut(ImGuiMod_Ctrl | ImGuiKey_N, g)) new_analysis();
+    if (Shortcut(ImGuiMod_Ctrl | ImGuiKey_O, g)) show_open_dialog(FilePurpose::OpenAnalysis, default_dir());
+    if (Shortcut(ImGuiMod_Ctrl | ImGuiKey_S, g)) save_analysis_or_ask();
     // Text size: Ctrl+= (or Ctrl++), Ctrl+-, Ctrl+0, also on the keypad.
     if (Shortcut(ImGuiMod_Ctrl | ImGuiKey_Equal, g) || Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Equal, g) ||
         Shortcut(ImGuiMod_Ctrl | ImGuiKey_KeypadAdd, g))

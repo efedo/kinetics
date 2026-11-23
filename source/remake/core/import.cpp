@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <limits>
@@ -260,6 +261,47 @@ bool is_v351_spreadsheet(std::string_view text) {
         if (i < line.size() && line[i] == '=') return true;
     }
     return false;
+}
+
+std::string format_run_table(const std::vector<NamedPoints>& runs, std::string_view xHeading) {
+    // Cells hold no separators or quotes, so that the file reads back as written.
+    const auto cell = [](std::string_view s) {
+        std::string out;
+        for (char c : s) out += (c == ',' || c == ';' || c == '\t' || c == '"' || c == '\n' || c == '\r') ? ' ' : c;
+        return out;
+    };
+    const auto num = [](double v) {
+        char buf[40];
+        std::snprintf(buf, sizeof buf, "%.10g", v);
+        return std::string(buf);
+    };
+    std::string s = cell(xHeading);
+    for (const auto& r : runs) s += "," + cell(r.name);
+    s += "\n";
+    std::vector<double> xs;
+    for (const auto& r : runs)
+        for (const auto& p : r.points)
+            if (std::isfinite(p.x) && std::isfinite(p.y)) xs.push_back(p.x);
+    std::sort(xs.begin(), xs.end());
+    xs.erase(std::unique(xs.begin(), xs.end()), xs.end());
+    for (double x : xs) {
+        std::vector<std::vector<double>> at(runs.size());
+        size_t rows = 0;
+        for (size_t r = 0; r < runs.size(); ++r) {
+            for (const auto& p : runs[r].points)
+                if (std::isfinite(p.y) && p.x == x) at[r].push_back(p.y);
+            rows = std::max(rows, at[r].size());
+        }
+        for (size_t j = 0; j < rows; ++j) {
+            s += num(x);
+            for (size_t r = 0; r < runs.size(); ++r) {
+                s += ',';
+                if (j < at[r].size()) s += num(at[r][j]);
+            }
+            s += '\n';
+        }
+    }
+    return s;
 }
 
 MpaParse parse_mpa_dataset(std::string_view text, int dataset, int count) {

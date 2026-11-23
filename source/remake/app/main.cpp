@@ -2,14 +2,15 @@
 // the desktop and (built with Emscripten) the browser.
 //
 // Command line (desktop; all optional, handy for scripting and screenshots):
-//   --open <table.csv>        open a data table
-//   --import <file>           import a spreadsheet file
-//   --import-mpa <file>       import an MPA file
+//   --open <file>             open a data table into the run shown, or a saved
+//                             analysis (*.kinetics)
+//   --import <file>           import a spreadsheet file of runs
+//   --import-mpa <file>       import an MPA file (for the classic interface)
 //   --model <a..k>            choose the equation by its v3.51 menu letter
 //   --fit                     fit the table after loading
-//   --analyse-all             analyse every run of the imported file
-//   --report <file>           append reports (current report options) to <file>:
-//                             one per run with --analyse-all, else the --fit result
+//   --analyse-all             fit every run
+//   --report <file>           after --fit or --analyse-all, append the report of
+//                             every fitted run (current report options) to <file>
 //   --tab <name>              results | graph | residuals | standard | runs | report
 //                             (standard: the Results tab's Calculate box)
 //   --plot <1..10>            plot type (v3.51 numbering)
@@ -150,7 +151,7 @@ app::Fonts load_fonts() {
 std::optional<app::Tab> tab_from_name(const std::string& n) {
     if (n == "results") return app::Tab::Results;
     if (n == "standard") return app::Tab::Results;  // the Calculate box
-    if (n == "runs") return app::Tab::FileRuns;
+    if (n == "runs") return app::Tab::Runs;
     if (n == "report") return app::Tab::Report;
     return std::nullopt;
 }
@@ -399,13 +400,17 @@ int main(int argc, char** argv) {
     const Options& o = c.opt;
     if (o.model)
         if (auto m = kin::model_from_letter(o.model)) c.app.set_model(*m);
-    if (!o.open.empty()) c.app.open_table_file(app::path_from_utf8(o.open));
-    if (!o.import.empty()) c.app.import_spreadsheet(app::path_from_utf8(o.import));
-    if (!o.importMpa.empty()) c.app.import_mpa(app::path_from_utf8(o.importMpa));
+    if (!o.open.empty()) {
+        const auto path = app::path_from_utf8(o.open);
+        if (path.extension() == ".kinetics") c.app.open_analysis_file(path, false);
+        else c.app.open_table_file(path);
+    }
+    if (!o.import.empty()) c.app.import_runs_file(app::path_from_utf8(o.import), false);
+    if (!o.importMpa.empty()) c.app.import_mpa(app::path_from_utf8(o.importMpa));  // for the classic interface
     if (!o.report.empty()) c.app.set_report_file(app::path_from_utf8(o.report));
     if (o.fit) c.app.request_fit();
-    if (o.analyseAll) c.app.analyse_file_runs();
-    if (!o.report.empty() && o.fit) c.app.write_current_report();
+    if (o.analyseAll) c.app.fit_all_runs();
+    if (!o.report.empty() && (o.fit || o.analyseAll)) c.app.write_current_report();
     if (o.plot >= 1 && o.plot <= 10) c.app.set_plot_type(static_cast<kin::PlotType>(o.plot));
     if (auto t = tab_from_name(o.tab)) c.app.select_tab(*t);
     else if (o.tab == "graph" || o.tab == "residuals") c.app.show_window(o.tab);
