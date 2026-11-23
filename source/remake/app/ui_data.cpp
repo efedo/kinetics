@@ -133,6 +133,7 @@ void App::section_fold_heading(Section s, const char* title, bool& open, bool fi
 void App::draw_model_section() {
     section_fold_heading(Section::Equation, "Equation", equationOpen_);
     help_link(HelpId::Equation);
+    heading_gap();
     if (!equationOpen_) return;
     const auto& def = kin::model_def(model_);
     const float fs = ImGui::GetFontSize();
@@ -287,21 +288,26 @@ void App::draw_parameter_table() {
 
 namespace {
 
-// The Fit button's face: a "play" triangle and the label, centred on the
-// last item (a button without a label of its own).
-void draw_play_face(const char* label) {
-    const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+// The Fit button: a "play" triangle and the label in the headings' type,
+// on a button sized to them. Returns true when pressed.
+bool play_button(const char* label) {
+    push_heading_font();
     const float fs = ImGui::GetFontSize();
     const ImVec2 ts = ImGui::CalcTextSize(label);
     const float th = std::round(fs * 0.7f);  // the triangle's height
     const float tw = std::round(th * 0.87f);  // and width
     const float gap = std::round(fs * 0.45f);
+    const ImVec2 size(std::round(tw + gap + ts.x + fs * 2.4f), std::round(ImGui::GetFrameHeight() * 1.3f));
+    const bool pressed = primary_button("##fit", size);
+    const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
     const float x = std::floor((a.x + b.x - (tw + gap + ts.x)) * 0.5f);
     const float cy = std::floor((a.y + b.y) * 0.5f);
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImU32 ink = ImGui::GetColorU32(ImGuiCol_Text);  // dimmed when disabled
     dl->AddTriangleFilled(ImVec2(x, cy - th * 0.5f), ImVec2(x + tw, cy), ImVec2(x, cy + th * 0.5f), ink);
     dl->AddText(ImVec2(x + tw + gap, std::floor(cy - ts.y * 0.5f)), ink, label);
+    ImGui::PopFont();
+    return pressed;
 }
 
 }  // namespace
@@ -314,10 +320,8 @@ void App::draw_fit_button() {
 
     ImGui::Spacing();
     ImGui::BeginDisabled(!haveData);
-    const char* label = runs ? "Fit all runs again" : results_stale() ? "Fit again" : "Fit";
-    const bool pressed = primary_button("##fit", ImVec2(-FLT_MIN, ImGui::GetFrameHeight() * 1.5f));
-    draw_play_face(label);
-    if (pressed) request_fit();
+    const char* label = runs ? "Fit all runs again (F5)" : results_stale() ? "Fit again (F5)" : "Fit (F5)";
+    if (play_button(label)) request_fit();
     ImGui::EndDisabled();
     if (runs)
         item_tooltip(batchStale_ ? "Fit every run of " + import_.path.filename().string() +
@@ -329,8 +333,8 @@ void App::draw_fit_button() {
         item_tooltip("Enter data first: type or paste " + std::string(def.xName) + " and " + std::string(def.yName) +
                      " values in the table above.");
     else
-        ImGui::SetItemTooltip(results_stale() ? "The data or settings have changed: fit again to update the results (F5)"
-                                              : "Fit the equation to the data in the table (F5)");
+        ImGui::SetItemTooltip(results_stale() ? "The equation or settings have changed: fit again to update the results"
+                                              : "Fit the equation to the data in the table");
 
     // Out-of-date results are flagged on the right; here, only a fit that
     // did not converge needs a word.
@@ -344,6 +348,7 @@ void App::draw_fit_button() {
 void App::draw_fit_section() {
     section_fold_heading(Section::Fit, "Fit", fitOpen_);
     help_link(HelpId::FittingOptions);
+    heading_gap();
     if (fitOpen_) {
         draw_parameter_table();
         ImGui::Spacing();
@@ -408,6 +413,13 @@ float table_height(float footer) {
     return std::max(minHeight, ImGui::GetWindowHeight() - ImGui::GetCursorPosY() - footer);
 }
 
+// The current table row in the accent colour: the point under the mouse on
+// the graph.
+void highlight_row() {
+    const ImVec4 a = palette().accent;
+    ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1, ImGui::GetColorU32(ImVec4(a.x, a.y, a.z, 0.35f)));
+}
+
 // Narrow columns: numbers need about 10 font heights, not the panel's width.
 float table_width() {
     return std::min(ImGui::GetContentRegionAvail().x, ImGui::GetFontSize() * 24.0f);
@@ -448,6 +460,7 @@ void App::draw_data_table() {
         ImGui::SetItemTooltip("%s", buttons[b].tip);
     }
     help_link(HelpId::Data);
+    heading_gap();
 
     if (rows_.empty() || !rows_.back().x.empty() || !rows_.back().y.empty()) rows_.push_back({});
     if (!dataOpen_) return;
@@ -460,6 +473,24 @@ void App::draw_data_table() {
                       " values in the table, then press Fit.")
                          .c_str(),
                      "");
+
+    // The row of the point under the mouse on the graph. The results' data
+    // are the table's numeric rows, so the point is found by its values
+    // (the nth of equal points, for replicates).
+    int hoverRow = -1;
+    if (hoveredPoint_ >= 0 && analysis_ && static_cast<size_t>(hoveredPoint_) < analysis_->data.size()) {
+        const auto& data = analysis_->data;
+        const kin::Point target = data[static_cast<size_t>(hoveredPoint_)];
+        int nth = 0;
+        for (int k = 0; k < hoveredPoint_; ++k)
+            nth += data[static_cast<size_t>(k)].x == target.x && data[static_cast<size_t>(k)].y == target.y;
+        for (size_t r = 0; r < rows_.size() && hoverRow < 0; ++r) {
+            double x = 0.0, y = 0.0;
+            if (parse_cell(rows_[r].x, x) == CellState::Number && parse_cell(rows_[r].y, y) == CellState::Number &&
+                x == target.x && y == target.y && nth-- == 0)
+                hoverRow = static_cast<int>(r);
+        }
+    }
 
     int insertAt = -1, deleteAt = -1;
     const ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInner | ImGuiTableFlags_ScrollY |
@@ -496,11 +527,13 @@ void App::draw_data_table() {
         ImGuiListClipper clipper;
         clipper.Begin(static_cast<int>(rows_.size()));
         if (focusTable_) clipper.IncludeItemByIndex(0);
+        if (hoverRow >= 0) clipper.IncludeItemByIndex(hoverRow);
         while (clipper.Step()) {
             for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
                 auto& row = rows_[static_cast<size_t>(i)];
                 ImGui::PushID(i);
                 ImGui::TableNextRow();
+                if (i == hoverRow) highlight_row();
                 ImGui::TableNextColumn();
                 ImGui::AlignTextToFramePadding();
                 const bool last = i + 1 == static_cast<int>(rows_.size());
@@ -509,6 +542,7 @@ void App::draw_data_table() {
                 ImGui::Selectable(last ? "*" : std::to_string(i + 1).c_str(), false,
                                   ImGuiSelectableFlags_AllowOverlap);
                 ImGui::PopItemFlag();
+                if (i == hoverRow && !ImGui::IsItemVisible()) ImGui::SetScrollHereY(0.5f);
                 if (ImGui::BeginPopupContextItem("##rowmenu")) {
                     if (ImGui::MenuItem("Insert row above")) insertAt = i;
                     if (ImGui::MenuItem("Delete row", nullptr, false, !last)) deleteAt = i;
@@ -568,6 +602,7 @@ void App::draw_run_points() {
     ImGui::AlignTextToFramePadding();
     ImGui::TextDisabled("%s #%d, read-only", sheet ? "run" : "dataset", item->runNumber);
     help_link(HelpId::FileData);
+    heading_gap();
     if (!dataOpen_) return;
 
     // The points the run was fitted to, or for a run that failed, its points
@@ -588,8 +623,12 @@ void App::draw_run_points() {
         ImGui::TableHeadersRow();
         for (size_t i = 0; i < pts.size(); ++i) {
             ImGui::TableNextRow();
+            // The point under the mouse on the graph (the run's own data).
+            const bool hovered = item->analysis && static_cast<int>(i) == hoveredPoint_;
+            if (hovered) highlight_row();
             ImGui::TableNextColumn();
             ImGui::TextDisabled("%zu", i + 1);
+            if (hovered && !ImGui::IsItemVisible()) ImGui::SetScrollHereY(0.5f);
             ImGui::TableNextColumn();
             ImGui::TextUnformatted(number_text(pts[i].x).c_str());
             ImGui::TableNextColumn();

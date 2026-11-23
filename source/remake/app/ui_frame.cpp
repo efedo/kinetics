@@ -104,6 +104,8 @@ StepState verdict_state(const kin::Analysis& a, std::string& label) {
 bool App::frame() {
     handle_file_results();
     handle_shortcuts();
+    // The point the graph found under the mouse last frame, for the table.
+    hoveredPoint_ = std::exchange(hoverNext_, -1);
     // The classic interface may have ended the run view.
     if (tableResult_ && !showing_run()) leave_run_view();
 
@@ -490,11 +492,11 @@ void App::draw_menu_bar() {
         if (ImGui::MenuItem("Show file runs", "Alt+W", false, haveImport)) requestedTab_ = Tab::FileRuns;
         ImGui::Separator();
         if (ImGui::MenuItem(("Find " + xName + " for a given " + yName + "...").c_str(), "Alt+X", false, haveFit)) {
-            requestedTab_ = Tab::StandardCurve;
+            requestedTab_ = Tab::Results;
             focusStdX_ = true;
         }
         if (ImGui::MenuItem(("Find " + yName + " for a given " + xName + "...").c_str(), "Alt+Y", false, haveFit)) {
-            requestedTab_ = Tab::StandardCurve;
+            requestedTab_ = Tab::Results;
             focusStdY_ = true;
         }
         ImGui::Separator();
@@ -524,7 +526,6 @@ void App::draw_menu_bar() {
         if (ImGui::MenuItem("Results", "Alt+L")) requestedTab_ = Tab::Results;
         if (ImGui::MenuItem("Graph", "Alt+G", false, haveFit)) show_window("graph");
         if (ImGui::MenuItem("Residuals", "Alt+I", false, haveFit)) show_window("residuals");
-        if (ImGui::MenuItem("Standard curve", nullptr, false, haveFit)) requestedTab_ = Tab::StandardCurve;
         if (ImGui::MenuItem("File runs", nullptr, false, haveImport)) requestedTab_ = Tab::FileRuns;
         if (ImGui::MenuItem("Report", nullptr, false, haveFit)) requestedTab_ = Tab::Report;
         ImGui::Separator();
@@ -588,11 +589,11 @@ void App::handle_shortcuts() {
     }
     if (Shortcut(ImGuiMod_Alt | ImGuiKey_W, g)) requestedTab_ = Tab::FileRuns;
     if (Shortcut(ImGuiMod_Alt | ImGuiKey_X, g)) {
-        requestedTab_ = Tab::StandardCurve;
+        requestedTab_ = Tab::Results;
         focusStdX_ = true;
     }
     if (Shortcut(ImGuiMod_Alt | ImGuiKey_Y, g)) {
-        requestedTab_ = Tab::StandardCurve;
+        requestedTab_ = Tab::Results;
         focusStdY_ = true;
     }
     if (Shortcut(ImGuiMod_Alt | ImGuiKey_L, g)) requestedTab_ = Tab::Results;

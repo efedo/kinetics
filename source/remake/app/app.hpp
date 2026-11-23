@@ -36,7 +36,7 @@ class Session;
 namespace app {
 
 // The Results tab holds the parameters, the graph and the residuals.
-enum class Tab { Results, StandardCurve, FileRuns, Report };
+enum class Tab { Results, FileRuns, Report };
 
 class App {
     friend class AppClassicSession;
@@ -66,6 +66,11 @@ public:
     // help | about | report-options | fit-options | graph | residuals
     void show_window(const std::string& name);
     void select_tab(Tab t) { requestedTab_ = t; }
+    // The Prediction box's inputs: a Y to read X for, and an X to read Y for.
+    void set_predictions(const std::string& forY, const std::string& forX) {
+        predictFromY_ = forY;
+        predictFromX_ = forX;
+    }
     void set_plot_type(kin::PlotType t);
     // View > Text size: a percentage of the normal size, clamped to kTextScales.
     static constexpr std::array<int, 6> kTextScales{80, 90, 100, 115, 130, 150};
@@ -87,12 +92,21 @@ private:
         batchStale_ = true;
         notice_.reset();  // a change dismisses the message
     }
-    // The table changed. The file runs depend on it only for MPA files,
-    // whose concentrations come from the table.
+    // The table changed. Its fit no longer describes it, so the results go
+    // at once, and the report and predictions made from them with it. The
+    // file runs depend on the table only for MPA files, whose concentrations
+    // come from it. The Data section opens to show the table.
     void mark_table_changed() {
-        stale_ = true;
+        if (!showing_run()) {
+            analysis_.reset();
+            analysisRun_.reset();
+            stale_ = false;
+            reportWritten_ = false;
+            refitPlot_ = true;
+        }
         if (import_.type == ImportType::Mpa) batchStale_ = true;
         notice_.reset();
+        dataOpen_ = true;
     }
     std::vector<kin::Point> table_points(int* invalidCells = nullptr) const;
     void set_table(const std::vector<kin::Point>& pts);
@@ -210,8 +224,17 @@ private:
     void draw_residuals_section(const kin::Analysis& a);
     void draw_history_section(const kin::Analysis& a);
     void draw_plot_controls();
+    // The height the graph needs at this width: at least a third of its
+    // width, and the residual strip under it a quarter.
+    float plot_min_height(float width) const;
     void draw_plot(const ImVec2& size);
-    void draw_standard_curve_tab();
+    // The exact values of results data point i, in a tooltip.
+    void point_tooltip(const kin::Analysis& a, int i);
+    // Predictions from the fitted curve (formerly the Standard curve tab).
+    void draw_prediction_box(const kin::Analysis& a, float width);
+    // The Prediction box's answers as points on the curve, in the data's
+    // units: [0] the X read off for the entered Y, [1] the Y for the entered X.
+    std::array<std::optional<std::pair<double, double>>, 2> prediction_points(const kin::Analysis& a) const;
     void draw_file_runs_tab();
     void draw_report_tab();
 
@@ -266,7 +289,6 @@ private:
     kin::PlotOptions plotOptions_;
     bool numberPoints_ = true;
     bool refitPlot_ = true;
-    bool showFittedValues_ = true;  // the fitted constants in the legend
     bool residualStrip_ = true;     // residuals in a strip under the Normal plot
     float resultsFooterHeight_ = 0.0f;  // Residuals and history headers, below the plot (last frame)
     bool scrollToPlot_ = false;
@@ -276,9 +298,13 @@ private:
     ImportState import_;
     BatchState batch_;
     ReportState report_;
-    std::vector<StdCurveEntry> stdCurve_;
-    double stdInputY_ = 0.0;
-    double stdInputX_ = 0.0;
+    // The Prediction box's inputs, as typed: a Y to read X off the curve
+    // for, and an X to read Y for. Blank for none.
+    std::string predictFromY_, predictFromX_;
+    // The data point under the mouse on the graph (an index into the
+    // results' data), highlighted in the table on the next frame.
+    int hoveredPoint_ = -1;
+    int hoverNext_ = -1;
 
     std::optional<Tab> requestedTab_;
     // The table, data source and results before a change that can be undone.
@@ -310,8 +336,8 @@ private:
     PendingReport pendingReport_ = PendingReport::None;
     bool focusModel_ = false;
     bool focusTable_ = false;
-    bool focusStdX_ = false;  // "new X for entered Y"
-    bool focusStdY_ = false;  // "new Y for entered X"
+    bool focusStdX_ = false;  // Prediction box: X for a given Y
+    bool focusStdY_ = false;  // Prediction box: Y for a given X
     bool quit_ = false;
     bool classicRequested_ = false;
 };

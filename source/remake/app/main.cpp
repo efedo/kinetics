@@ -11,10 +11,13 @@
 //   --report <file>           append reports (current report options) to <file>:
 //                             one per run with --analyse-all, else the --fit result
 //   --tab <name>              results | graph | residuals | standard | runs | report
+//                             (standard: the Results tab's Prediction box)
 //   --plot <1..10>            plot type (v3.51 numbering)
 //   --show <name>             help | about | report-options | fit-options | graph | residuals
 //   --theme <name>            system (default) | dark | light
 //   --text-size <percent>     text size, 80 to 150 (default 100)
+//   --predict-x <y>           Prediction box: read X off the curve for this Y
+//   --predict-y <x>           Prediction box: read Y off the curve for this X
 //   --classic                 start in the classic (v3.51) interface
 //   --classic-keys <keys>     start in the classic interface and type these keys,
 //                             e.g. "alt+t,a,enter" (see classic::Host::inject_keys)
@@ -50,7 +53,7 @@
 namespace {
 
 struct Options {
-    std::string open, import, importMpa, tab, screenshot, show, report, theme, classicKeys;
+    std::string open, import, importMpa, tab, screenshot, show, report, theme, classicKeys, predictX, predictY;
     bool classic = false;
     char model = 0;
     int plot = 0;
@@ -81,6 +84,8 @@ Options parse_args(int argc, char** argv) {
         else if (a == "--screenshot") o.screenshot = next();
         else if (a == "--theme") o.theme = next();
         else if (a == "--text-size") o.textSize = std::atoi(next().c_str());
+        else if (a == "--predict-x") o.predictX = next();
+        else if (a == "--predict-y") o.predictY = next();
         else if (a == "--classic") o.classic = true;
         else if (a == "--classic-keys") o.classicKeys = next();
         else if (a == "--size") {
@@ -144,7 +149,7 @@ app::Fonts load_fonts() {
 // "graph" and "residuals" are parts of the Results tab (App::show_window).
 std::optional<app::Tab> tab_from_name(const std::string& n) {
     if (n == "results") return app::Tab::Results;
-    if (n == "standard") return app::Tab::StandardCurve;
+    if (n == "standard") return app::Tab::Results;  // the Prediction box
     if (n == "runs") return app::Tab::FileRuns;
     if (n == "report") return app::Tab::Report;
     return std::nullopt;
@@ -407,6 +412,7 @@ int main(int argc, char** argv) {
     if (!o.show.empty()) c.app.show_window(o.show);
     if (auto t = app::theme_from_name(o.theme)) app::set_theme(*t);
     if (o.textSize > 0) c.app.set_text_scale(o.textSize);
+    if (!o.predictX.empty() || !o.predictY.empty()) c.app.set_predictions(o.predictX, o.predictY);
     if (o.classic || !o.classicKeys.empty()) {
         enter_classic(c);
         if (!o.classicKeys.empty()) c.classicHost.inject_keys(o.classicKeys);

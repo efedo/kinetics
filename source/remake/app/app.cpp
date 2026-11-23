@@ -51,7 +51,6 @@ void App::load_settings() {
     report_.newFile = report_.file.empty() || !std::filesystem::exists(report_.file);
     report_.nextNumber = o.startNumber;
     numberPoints_ = s.get_bool("plot.numberPoints", true);
-    showFittedValues_ = s.get_bool("plot.fittedValues", true);
     residualStrip_ = s.get_bool("plot.residualStrip", true);
     xUnit_ = s.get("data.xUnit");
     yUnit_ = s.get("data.yUnit");
@@ -78,7 +77,6 @@ void App::save_settings() const {
     s.set_int("report.start", o.startNumber);
     s.set("report.file", report_.file.string());
     s.set_bool("plot.numberPoints", numberPoints_);
-    s.set_bool("plot.fittedValues", showFittedValues_);
     s.set_bool("plot.residualStrip", residualStrip_);
     s.set("data.xUnit", xUnit_);
     s.set("data.yUnit", yUnit_);
@@ -222,6 +220,16 @@ std::vector<kin::Point> App::table_points(int* invalidCells) const {
 
 void App::set_table(const std::vector<kin::Point>& pts) {
     leave_run_view();  // what changes is the table, so show it
+    dataOpen_ = true;
+    // The same points again (the classic interface's data editor closed
+    // without a change, a table already in order sorted): the results still
+    // describe them, so they stay.
+    const auto now = table_points();
+    const auto same = [](double a, double b) { return a == b || (std::isnan(a) && std::isnan(b)); };
+    if (now.size() == pts.size() &&
+        std::equal(now.begin(), now.end(), pts.begin(),
+                   [&](const kin::Point& a, const kin::Point& b) { return same(a.x, b.x) && same(a.y, b.y); }))
+        return;
     rows_.clear();
     for (const auto& p : pts) rows_.push_back({number_text(p.x), number_text(p.y)});
     rows_.push_back({});
@@ -566,6 +574,7 @@ void App::analyse_all_runs() {
     for (size_t i = 0; i < batch_.items.size(); ++i)
         if (batch_.items[i].analysis) {
             show_batch_item(static_cast<int>(i));
+            dataOpen_ = true;  // the Data section shows the run's points
             break;
         }
     if (batch_.writeReports) write_batch_reports();
@@ -729,8 +738,18 @@ void App::copy_results() {
         t += "\n";
     }
     t += "Residual SD\t" + kin::fmt_g(a.fit.stdDev) + "\t\t\t" + (def.family == kin::Family::Arrhenius ? "" : yUnit_) + "\n";
+    // Then each point with its fitted value and residual.
+    t += "\nPoint\t" + x_heading(a.model()) + "\t" + y_heading(a.model()) + "\tFitted " + std::string(def.yName) +
+         "\tResidual\n";
+    for (size_t i = 0; i < a.data.size(); ++i) {
+        t += std::to_string(i + 1) + "\t" + kin::fmt_g(a.data[i].x) + "\t" + kin::fmt_g(a.data[i].y) + "\t";
+        if (i < a.yhat.size()) t += kin::fmt_g(a.yhat[i]);
+        t += "\t";
+        if (i < a.resid.size()) t += kin::fmt_g(a.resid[i]);
+        t += "\n";
+    }
     ImGui::SetClipboardText(t.c_str());
-    info("Results copied to the clipboard, as a table for a spreadsheet.");
+    info("Results copied to the clipboard, as tables for a spreadsheet.");
 }
 
 void App::clear_table() {

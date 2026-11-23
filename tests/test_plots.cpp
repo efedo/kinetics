@@ -779,3 +779,23 @@ TEST_CASE(plots_sweep, "plots: every available plot of every equation lies on th
         }
     }
 }
+
+TEST_CASE(plots_coordinates, "plots: a point in plot coordinates, as the data are drawn") {
+    const auto a = analysis(ModelId::MichaelisMenten, {2.0, 10.0}, {{0.5, 2.1}, {1.0, 3.4}, {4.0, 6.5}, {8.0, 8.1}});
+    auto same_or_nan = [](double u, double v) { return (std::isnan(u) && std::isnan(v)) || u == v; };
+    for (const auto t : available_plots(ModelId::MichaelisMenten)) {
+        const auto pd = plot(a, t);
+        for (size_t i = 0; i < a.data.size(); ++i) {
+            const auto [X, Y] = plot_coordinates(a, t, a.data[i].x, a.data[i].y);
+            if (t == P::Residual) {
+                CHECK(std::isnan(X) && std::isnan(Y));  // the residual plot's axes are not the data's
+                continue;
+            }
+            CHECK(same_or_nan(X, pd.px[i]));
+            CHECK(same_or_nan(Y, pd.py[i]));
+        }
+    }
+    // A point off the data, on a double-reciprocal plot.
+    const auto [X, Y] = plot_coordinates(a, P::LineweaverBurk, 4.0, 5.0);
+    CHECK(X == 0.25 && Y == 0.2);
+}

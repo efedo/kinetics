@@ -4,6 +4,7 @@
 
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "core/analysis.hpp"
@@ -49,5 +50,10 @@ struct PlotData {
 };
 
 PlotData make_plot(const Analysis& analysis, PlotType type, const PlotOptions& options);
+
+// A point given in the data's units (x, y) in the plot's coordinates, as
+// make_plot transforms the data; NaN where the transform is undefined, and
+// on the residual plot, whose axes are not the data's.
+std::pair<double, double> plot_coordinates(const Analysis& analysis, PlotType type, double x, double y);
 
 }  // namespace kin

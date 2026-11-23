@@ -299,4 +299,10 @@ PlotData make_plot(const Analysis& a, PlotType t, const PlotOptions& opt) {
     return pd;
 }
 
+std::pair<double, double> plot_coordinates(const Analysis& a, PlotType t, double x, double y) {
+    if (t == PlotType::Residual) return {kNaN, kNaN};
+    const Ctx c = make_ctx(a);
+    return {tx(t, c, x, y), ty(t, c, x, y)};
+}
+
 }  // namespace kin

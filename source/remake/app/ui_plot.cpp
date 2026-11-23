@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <cmath>
 #include <cstdio>
 
 #include "app/app.hpp"
@@ -45,21 +46,63 @@ const std::vector<PlotGroup>& plot_groups() {
     return groups;
 }
 
-// "Km = 2.71 ± 0.14 µM, Vmax = 10.24 ± 0.18" for the legend.
-std::string fitted_values(const kin::Analysis& a, const std::vector<std::string>& units) {
-    std::string s;
-    const auto rows = a.parameter_rows();
-    for (size_t i = 0; i < rows.size(); ++i) {
-        const auto& r = rows[i];
-        if (r.derived) continue;
-        s += (s.empty() ? "" : ", ") + r.name + " = " +
-             (r.fixed ? format_value_sd(r.value, NAN).value + " (fixed)" : format_value_pm(r.value, r.sd));
-        if (i < units.size() && !units[i].empty()) s += " " + units[i];
+// The data point nearest the mouse on the current plot, within a little
+// under a font height, or -1. xs and ys are in plot coordinates.
+int point_under_mouse(const std::vector<double>& xs, const std::vector<double>& ys) {
+    if (!ImPlot::IsPlotHovered()) return -1;
+    const ImVec2 mouse = ImGui::GetMousePos();
+    const float reach = ImGui::GetFontSize() * 0.7f;
+    float bestD = reach * reach;
+    int best = -1;
+    for (size_t k = 0; k < xs.size() && k < ys.size(); ++k) {
+        if (!std::isfinite(xs[k]) || !std::isfinite(ys[k])) continue;
+        const ImVec2 q = ImPlot::PlotToPixels(xs[k], ys[k]);
+        const float dx = q.x - mouse.x, dy = q.y - mouse.y;
+        if (dx * dx + dy * dy <= bestD) {
+            bestD = dx * dx + dy * dy;
+            best = static_cast<int>(k);
+        }
     }
-    return s;
+    return best;
+}
+
+// A ring around the point at (x, y), in plot coordinates.
+void ring(double x, double y) {
+    ImPlot::GetPlotDrawList()->AddCircle(ImPlot::PlotToPixels(x, y), ImGui::GetFontSize() * 0.55f,
+                                         ImGui::GetColorU32(palette().accent), 0, 2.0f);
 }
 
 }  // namespace
+
+// The exact values of data point i, for the tooltip over it on the graph.
+void App::point_tooltip(const kin::Analysis& a, int i) {
+    const auto k = static_cast<size_t>(i);
+    if (k >= a.data.size()) return;
+    const auto& def = kin::model_def(a.model());
+    const bool arrhenius = def.family == kin::Family::Arrhenius;
+    const std::string xu = xUnit_.empty() || arrhenius ? std::string() : " " + xUnit_;
+    const std::string yu = yUnit_.empty() || arrhenius ? std::string() : " " + yUnit_;
+    if (!ImGui::BeginTooltip()) return;
+    ImGui::Text("Point %d", i + 1);
+    ImGui::Separator();
+    ImGui::Text("%s = %s%s", std::string(def.xName).c_str(), kin::fmt_g(a.data[k].x, 10).c_str(), xu.c_str());
+    ImGui::Text("%s = %s%s", std::string(def.yName).c_str(), kin::fmt_g(a.data[k].y, 10).c_str(), yu.c_str());
+    if (k < a.yhat.size() && k < a.resid.size()) {
+        ImGui::TextDisabled("Fitted %s = %s, residual %s%s", std::string(def.yName).c_str(),
+                            kin::fmt_g(a.yhat[k], 6).c_str(), a.resid[k] >= 0.0 ? "+" : "",
+                            kin::fmt_g(a.resid[k], 4).c_str());
+        if (k < a.largeResidual.size() && a.largeResidual[k])
+            ImGui::TextColored(palette().warning, "2 residual SDs or more from the curve");
+    }
+    ImGui::EndTooltip();
+}
+
+float App::plot_min_height(float width) const {
+    const float fs = ImGui::GetFontSize();
+    const float graph = std::max(width / 3.0f, fs * 10.0f);
+    const bool strip = residualStrip_ && plotType_ == kin::PlotType::Normal && analysis_ && !analysis_->data.empty();
+    return strip ? graph + std::max(width / 4.0f, fs * 6.0f) : graph;
+}
 
 void App::draw_plot_controls() {
     if (!analysis_) return;
@@ -104,7 +147,6 @@ void App::draw_plot_controls() {
             ImGui::SetItemTooltip("Draws the line to where it crosses Y = 0 and labels that X value");
         }
         bool save = ImGui::Checkbox("Number the points", &numberPoints_);
-        if (!residual) save |= ImGui::Checkbox("Show the fitted values", &showFittedValues_);
         if (plotType_ == kin::PlotType::Normal) {
             if (ImGui::Checkbox("Show the residuals under the graph", &residualStrip_)) {
                 save = true;
@@ -120,6 +162,10 @@ void App::draw_plot_controls() {
     if (ImGui::Button("Reset view")) refitPlot_ = true;
     ImGui::SetItemTooltip("Fit the axes to the data again after zooming or panning");
     if (changed) refitPlot_ = true;
+    same_line_if_fits(button_width("Copy results") + helpW);
+    if (ImGui::Button("Copy results")) copy_results();
+    ImGui::SetItemTooltip("Copy the parameters, and each point with its fitted value and residual, with all digits, "
+                          "as tables to paste into a spreadsheet. The Report tab has the full report.");
     help_link(HelpId::Plotting);
 }
 
@@ -130,18 +176,16 @@ void App::draw_plot(const ImVec2& size) {
     const auto& def = kin::model_def(m);
     const bool residual = plotType_ == kin::PlotType::Residual;
     const bool interceptMeaningful = !residual && (plotType_ != kin::PlotType::Normal || m == kin::ModelId::Linear);
-    // The residual strip needs some height to be readable: about a third of
-    // the plot and at least 6 font heights. Without room for it and the
-    // curve, it is left out.
+    // The residual strip is a quarter of the plot's width high, and the graph
+    // above it gets the rest (the caller leaves it at least a third of the
+    // width; see plot_min_height).
     const float fs = ImGui::GetFontSize();
-    const float stripH = std::clamp(size.y * 0.3f, fs * 6.0f, fs * 10.0f);
-    const bool strip = residualStrip_ && plotType_ == kin::PlotType::Normal && !a.data.empty() &&
-                       size.y - stripH >= fs * 9.0f;
+    const float stripH = std::max(size.x / 4.0f, fs * 6.0f);
+    const bool strip = residualStrip_ && plotType_ == kin::PlotType::Normal && !a.data.empty();
     const auto pd = kin::make_plot(a, plotType_, plotOptions_);
+    const auto predictions = prediction_points(a);
 
     // Units for the axes of the normal plot, whose axes are the data's.
-    std::vector<std::string> units;
-    for (const auto& p : def.params) units.push_back(unit_of(p.role, m));
     const bool normal = plotType_ == kin::PlotType::Normal;
     const bool arrhenius = def.family == kin::Family::Arrhenius;
     const std::string xUnit = normal && !arrhenius ? xUnit_ : std::string();
@@ -175,22 +219,18 @@ void App::draw_plot(const ImVec2& size) {
     };
 
     auto main_plot = [&](const ImVec2& plotSize) {
-        if (!ImPlot::BeginPlot("##graph", plotSize, ImPlotFlags_NoTitle)) return;
+        // No legend: the parameters are just above the graph.
+        if (!ImPlot::BeginPlot("##graph", plotSize, ImPlotFlags_NoTitle | ImPlotFlags_NoLegend)) return;
         // With the residual strip below, its X axis carries the labels.
         ImPlot::SetupAxes(strip ? nullptr : xLabel.c_str(), yLabel.c_str(), strip ? ImPlotAxisFlags_NoTickLabels : 0, 0);
         if (refit) ImPlot::SetupAxesLimits(pd.xmin, pd.xmax, pd.ymin, pd.ymax, ImPlotCond_Always);
-        ImPlot::SetupLegend(ImPlotLocation_North, ImPlotLegendFlags_Outside | ImPlotLegendFlags_Horizontal);
         origin_axes(true);
 
         if (!pd.cx.empty()) {
             ImPlotSpec curve;
             curve.LineColor = faded(palette().accent);
             curve.LineWeight = 2.0f;
-            // The legend carries the fitted constants, so that a copy of the
-            // plot shows them; a plot too narrow for them keeps a short label.
-            std::string label = showFittedValues_ ? "Fit: " + fitted_values(a, units) : std::string("Fitted curve");
-            if (ImGui::CalcTextSize(label.c_str()).x + fs * 6.0f > ImPlot::GetPlotSize().x) label = "Fitted curve";
-            ImPlot::PlotLine(label.c_str(), pd.cx.data(), pd.cy.data(), static_cast<int>(pd.cx.size()), curve);
+            ImPlot::PlotLine("Fitted curve", pd.cx.data(), pd.cy.data(), static_cast<int>(pd.cx.size()), curve);
         }
 
         ImPlotSpec pts;
@@ -214,6 +254,30 @@ void App::draw_plot(const ImVec2& size) {
         if (interceptMeaningful && plotOptions_.extendToXIntercept && pd.xIntercept) {
             ImPlot::Annotation(*pd.xIntercept, 0.0, faded(palette().accent), ImVec2(0, 18), true,
                                "X = %s", kin::fmt_g(*pd.xIntercept, 4).c_str());
+        }
+
+        // The Prediction box's answers, each a cross of its colour on the curve.
+        for (int k = 0; k < 2; ++k) {
+            const auto& pt = predictions[static_cast<size_t>(k)];
+            if (!pt) continue;
+            const auto [X, Y] = kin::plot_coordinates(a, plotType_, pt->first, pt->second);
+            if (!std::isfinite(X) || !std::isfinite(Y)) continue;
+            ImPlotSpec cross;
+            cross.Marker = ImPlotMarker_Cross;
+            cross.MarkerSize = 7.0f;
+            cross.LineWeight = 2.5f;
+            cross.LineColor = faded(prediction_colour(k));
+            cross.Flags = ImPlotItemFlags_NoFit;
+            const double xs[1] = {X}, ys[1] = {Y};
+            ImPlot::PlotScatter(k == 0 ? "##predict0" : "##predict1", xs, ys, 1, cross);
+        }
+
+        // The point under the mouse: its exact values, and its row in the
+        // data table highlighted.
+        if (const int k = point_under_mouse(pd.px, pd.py); k >= 0) {
+            ring(pd.px[static_cast<size_t>(k)], pd.py[static_cast<size_t>(k)]);
+            hoverNext_ = pd.labels[static_cast<size_t>(k)] - 1;
+            point_tooltip(a, hoverNext_);
         }
         ImPlot::EndPlot();
     };
@@ -243,10 +307,21 @@ void App::draw_plot(const ImVec2& size) {
         pts.LineColor = faded(palette().text);
         pts.MarkerFillColor = faded(palette().text);
         ImPlot::PlotScatter("Residual", xs.data(), ys.data(), static_cast<int>(xs.size()), pts);
-        // Residuals of 2 SDs or more, in amber as in the residual table.
+        // Residuals of 2 SDs or more, in amber.
         pts.LineColor = faded(palette().warning);
         pts.MarkerFillColor = faded(palette().warning);
         ImPlot::PlotScatter("Large residual", bx.data(), by.data(), static_cast<int>(bx.size()), pts);
+        // As on the graph: the values of the point under the mouse.
+        std::vector<double> ax, ay;
+        for (size_t i = 0; i < a.data.size() && i < a.resid.size(); ++i) {
+            ax.push_back(a.data[i].x);
+            ay.push_back(a.resid[i]);
+        }
+        if (const int k = point_under_mouse(ax, ay); k >= 0) {
+            ring(ax[static_cast<size_t>(k)], ay[static_cast<size_t>(k)]);
+            hoverNext_ = k;
+            point_tooltip(a, k);
+        }
         ImPlot::EndPlot();
     };
 

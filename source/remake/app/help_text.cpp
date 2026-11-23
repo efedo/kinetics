@@ -144,12 +144,12 @@ constexpr HelpTopic kTopics[] = {
      "the data. If those are too far from the answer you can enter your own (see Fit settings).\n\n"
      "## Reading the results\n\n"
      "The Results tab shows, from the top: a verdict on the fit, the constants, the range of the data, "
-     "the graph, and folded sections with the residuals and the iteration history. On a wide window "
-     "the constants sit beside the graph.\n\n"
+     "the Prediction box, the graph, and folded sections with the residual tests and the iteration "
+     "history. On a wide window the constants sit beside the graph.\n\n"
      "Each value is rounded to the precision its standard deviation supports, for example "
      "Km = 2.71 \xC2\xB1 0.14. Hold the mouse over a value to see all its digits; Copy results and the "
-     "reports keep them too. If you change the data or the settings after a fit, the results are "
-     "greyed out until you fit again.\n\n"
+     "reports keep them too. If you change the data after a fit, the results are cleared; if you "
+     "change the equation or the fit settings, they are greyed out until you fit again.\n\n"
      "## The verdict\n\n"
      "The verdict is green when every constant is determined to within 10%, amber when something "
      "needs a look, and red when the fit cannot be trusted. It says which parameter is the problem and "
@@ -172,8 +172,8 @@ constexpr HelpTopic kTopics[] = {
      "Fit anyway, the data cannot pin the curve down and the fitted values mean little."},
 
     {"Plotting your data",
-     "The graph on the Results tab plots the data and the fitted curve, with the fitted constants in "
-     "the legend. Choose a plot from the Plot list, which puts the recommended plots (Normal and "
+     "The graph on the Results tab plots the data and the fitted curve, under the fitted constants. "
+     "Choose a plot from the Plot list, which puts the recommended plots (Normal and "
      "Residuals) first and the linear transforms after them.\n\n"
      "## The plots\n\n"
      "The NORMAL plot shows [S], [A], [I], X or T against v, Y or log10(v), with a strip of the "
@@ -194,16 +194,19 @@ constexpr HelpTopic kTopics[] = {
      "The Display list controls the display, as the space bar did in version 3.51: include the origin "
      "in the axes, extend the curve to the Y axis, and, on the straight-line plots, extend the line to "
      "where it crosses Y = 0 (for example to -1/Km on a Lineweaver-Burk plot). It also turns the point "
-     "numbers, the fitted values in the legend and the residual strip on or off. Points are numbered "
-     "as in the data and residual tables.\n\n"
+     "numbers and the residual strip on or off. Points are numbered as in the data table. Hold the "
+     "mouse over a point to see its values; its row in the data table is highlighted.\n\n"
      "Drag to pan, scroll to zoom, double-click or 'Reset view' to fit the axes, and right-click for "
-     "more options. The residual strip appears when the graph has room for it."},
+     "more options. The graph is at least a third as high as it is wide, and the residual strip a "
+     "quarter; the Results tab scrolls when the window is too small for them. The predictions of the "
+     "Prediction box are marked by crosses of their colours."},
 
     {"What residuals tell you",
      "It is sometimes difficult to decide which equation suits your data. Two non-parametric tests "
      "of the residuals give some support for (or against) the chosen equation. Their outcome is given "
-     "in the 'Residuals and randomness tests' heading below the graph; open it for the details and the "
-     "table of residuals. The long report has them too.\n\n"
+     "in the 'Residuals and randomness tests' heading below the graph; open it for the details and "
+     "the points 2 residual SDs or more from the curve. Hold the mouse over a point on the graph for "
+     "its fitted value and residual; Copy results and the long report list them all.\n\n"
      "## The two tests\n\n"
      "The sequence (runs) test asks whether the order of + and - residuals is random. With 8 points "
      "(8 residuals if there are no repeats) the sequence -+-+-+-+ looks random, but is --++---+ "
@@ -215,13 +218,15 @@ constexpr HelpTopic kTopics[] = {
      "means absolute; a complete analysis needs more extensive statistics."},
 
     {"Using your data as a standard curve",
-     "The fitted curve can be used as a standard curve. Enter your data, choose an equation, fit, "
-     "then open the Standard curve tab (Calculate > Find [S] for a given v, Alt+X, or Find v for a "
-     "given [S], Alt+Y; the names follow the equation's columns).\n\n"
+     "The fitted curve can be used as a standard curve. Enter your data, choose an equation and fit; "
+     "the Prediction box on the Results tab then reads values off the curve. Type a v to get the [S] "
+     "that gives it (Calculate > Find [S] for a given v, Alt+X), or an [S] to get its v (Find v for a "
+     "given [S], Alt+Y); the names follow the equation's columns. Each answer is marked on the graph "
+     "by a cross of its colour.\n\n"
      "New Y values are calculated from the best-fit parameters and the X ([S], [A] or [I]) you enter. "
      "For new X values the equation is inverted and X is calculated the same way. Both are idealised "
-     "values read from the fitted curve. A warning is shown when the value is outside the range of "
-     "the data."},
+     "values read from the fitted curve. A value outside the range of the data is marked "
+     "'extrapolated'."},
 
     {"Fit settings",
      "The Fit section, below Data and Equation, holds the settings most fits never need: fixed "

@@ -48,11 +48,4 @@ struct ReportState {
     std::string status;
 };
 
-struct StdCurveEntry {
-    bool xFromY = true;
-    double input = 0.0;
-    std::optional<double> output;
-    bool outOfRange = false;
-};
-
 }  // namespace app

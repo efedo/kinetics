@@ -76,6 +76,12 @@ inline void field_label(const char* label) {
 
 inline void field_label(const std::string& label) { field_label(label.c_str()); }
 
+// The colours of the Prediction box's two answers and of their crosses on
+// the graph: orange and purple, which read on both themes.
+inline ImVec4 prediction_colour(int i) {
+    return i == 0 ? ImVec4(0.93f, 0.49f, 0.13f, 1.0f) : ImVec4(0.70f, 0.38f, 0.90f, 1.0f);
+}
+
 // Text in a larger size of the heading (or the current) font.
 inline void push_heading_font(float scale = 1.12f) {
     ImGui::PushFont(fonts().heading, ImGui::GetStyle().FontSizeBase * scale);
@@ -95,17 +101,20 @@ inline void section_heading(const char* title, bool first = false) {
 
 inline void section_heading(const std::string& title, bool first = false) { section_heading(title.c_str(), first); }
 
-// A section heading that folds: the same title after a small arrow. A click
-// on either folds or unfolds the section (`open`). Returns true when clicked.
+// A section heading that folds: the title after a large arrow, underlined
+// across the panel so that it reads as a heading. A click on the arrow or
+// the title folds or unfolds the section (`open`). Returns true when
+// clicked. Leave a little space (heading_gap) after the heading's line.
 inline bool foldable_heading(const char* title, bool& open, bool first = false) {
-    if (!first) ImGui::Dummy(ImVec2(0.0f, ImGui::GetFontSize() * 0.5f));
+    if (!first) ImGui::Dummy(ImVec2(0.0f, ImGui::GetFontSize() * 0.6f));
     push_heading_font();
     const ImGuiStyle& st = ImGui::GetStyle();
     const float fs = ImGui::GetFontSize();
     const float h = ImGui::GetFrameHeight();
-    const float arrowW = std::round(fs * 1.0f);
+    const float arrowW = std::round(fs * 1.35f);
     const ImVec2 ts = ImGui::CalcTextSize(title);
     const ImVec2 p = ImGui::GetCursorScreenPos();
+    const float right = p.x + ImGui::GetContentRegionAvail().x;
     const ImVec2 size(arrowW + ts.x + st.FramePadding.x, h);
     ImGui::AlignTextToFramePadding();  // so that buttons and links after it line up with the title
     ImGui::PushID(title);
@@ -117,10 +126,14 @@ inline bool foldable_heading(const char* title, bool& open, bool first = false) 
     if (hovered)
         dl->AddRectFilled(p, ImVec2(p.x + size.x, p.y + size.y), ImGui::GetColorU32(ImGuiCol_ButtonHovered),
                           st.FrameRounding);
+    // The underline, across the panel just below the heading's line.
+    const ImVec4 a = palette().accent;
+    const float lineY = std::round(p.y + h + st.ItemSpacing.y * 0.5f);
+    dl->AddLine(ImVec2(p.x, lineY), ImVec2(right, lineY), ImGui::GetColorU32(ImVec4(a.x, a.y, a.z, 0.6f)), 2.0f);
     // The arrow: pointing down when open, right when folded.
-    const ImU32 arrow = ImGui::GetColorU32(hovered ? ImGui::GetStyleColorVec4(ImGuiCol_Text) : palette().textDim);
-    const float r = fs * 0.22f;
-    const ImVec2 c(p.x + arrowW * 0.45f, p.y + h * 0.5f);
+    const ImU32 arrow = ImGui::GetColorU32(hovered ? palette().accent : ImGui::GetStyleColorVec4(ImGuiCol_Text));
+    const float r = fs * 0.36f;
+    const ImVec2 c(p.x + arrowW * 0.42f, p.y + h * 0.5f);
     if (open)
         dl->AddTriangleFilled(ImVec2(c.x - r, c.y - r * 0.55f), ImVec2(c.x + r, c.y - r * 0.55f),
                               ImVec2(c.x, c.y + r * 0.65f), arrow);
@@ -132,6 +145,9 @@ inline bool foldable_heading(const char* title, bool& open, bool first = false) 
     ImGui::SetItemTooltip(open ? "Click to fold this section" : "Click to show this section");
     return clicked;
 }
+
+// The space under a foldable heading's line, clear of its underline.
+inline void heading_gap() { ImGui::Dummy(ImVec2(0.0f, ImGui::GetFontSize() * 0.3f)); }
 
 // Text drawn at the right edge of the line, after SameLine.
 inline void same_line_right(float width) {
