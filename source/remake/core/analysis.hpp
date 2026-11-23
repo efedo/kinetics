@@ -32,6 +32,13 @@ struct ParamRow {
     bool derived = false;  // e.g. Ea in kJ/mol, computed from Ea in kcal/mol
 };
 
+// A free parameter that ended the fit at one of its bounds.
+struct BoundHit {
+    int index = 0;      // into the model's parameters
+    bool upper = false;
+    double bound = 0.0;
+};
+
 struct Analysis {
     AnalysisRequest request;      // parameters as actually used
     std::vector<Point> data;      // valid points sorted by x, then y
@@ -54,6 +61,10 @@ struct Analysis {
     // for linear regression the t and F tests.
     std::vector<std::string> interpretation() const;
     std::vector<std::string> residual_test_lines() const;
+    // Free parameters that ended at (within a relative 1e-9 of) a bound: the
+    // data did not determine them. v3.51 did not report this, so the reports
+    // leave it out; the modern interface shows it.
+    std::vector<BoundHit> parameters_at_bounds() const;
 };
 
 struct AnalysisOutcome {

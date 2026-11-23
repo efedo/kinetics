@@ -32,7 +32,7 @@ constexpr ImVec4 kBlack(0.0f, 0.0f, 0.0f, 1.0f);
 
 constexpr Scheme kDark{
     true,
-    {rgb(0xdcdde0), rgb(0x8c8f95), rgb(0x6a9ed3), rgb(0xd9b35f), rgb(0xe0706a), rgb(0x5a2828)},
+    {rgb(0xdcdde0), rgb(0x8c8f95), rgb(0x6a9ed3), rgb(0xd9b35f), rgb(0xe0706a), rgb(0x5a2828), rgb(0x7cc28a)},
     rgb(0xb3b5ba),
     rgb(0x1e1f22), rgb(0x18191b), rgb(0x26272b, 0.98f), rgb(0x18191b), rgb(0x26272b), rgb(0x26272b),
     rgb(0x2a2c30), rgb(0x33353a), rgb(0x3a3d42),
@@ -45,7 +45,7 @@ constexpr Scheme kDark{
 
 constexpr Scheme kLight{
     false,
-    {rgb(0x1f2124), rgb(0x6b6f76), rgb(0x2b6cb0), rgb(0x956400), rgb(0xc0362c), rgb(0xf7d4d1)},
+    {rgb(0x1f2124), rgb(0x6b6f76), rgb(0x2b6cb0), rgb(0x956400), rgb(0xc0362c), rgb(0xf7d4d1), rgb(0x2e7d3c)},
     rgb(0x45484e),
     rgb(0xf3f3f5), rgb(0xe8e9ec), rgb(0xffffff, 0.98f), rgb(0xffffff), rgb(0xe8e9ec), rgb(0xdfe0e4),
     rgb(0xe5e6e9), rgb(0xdcdee2), rgb(0xd3d5da),
@@ -232,6 +232,13 @@ std::optional<ThemeChoice> theme_from_name(std::string_view name) {
     if (name == "light") return ThemeChoice::Light;
     return std::nullopt;
 }
+
+Fonts& fonts() {
+    static Fonts f;
+    return f;
+}
+
+ImVec4 bar_colour() { return g_scheme->menuBg; }
 
 bool primary_button(const char* label, const ImVec2& size) {
     const Scheme& s = *g_scheme;

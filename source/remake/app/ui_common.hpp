@@ -76,6 +76,58 @@ inline void field_label(const char* label) {
 
 inline void field_label(const std::string& label) { field_label(label.c_str()); }
 
+// Text in a larger size of the heading (or the current) font.
+inline void push_heading_font(float scale = 1.12f) {
+    ImGui::PushFont(fonts().heading, ImGui::GetStyle().FontSizeBase * scale);
+}
+
+inline void push_large_font(float scale = 1.3f) { ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * scale); }
+
+// A section title in the heading font, with some space above it unless it
+// starts its panel. Space and type set sections apart, not lines.
+inline void section_heading(const char* title, bool first = false) {
+    if (!first) ImGui::Dummy(ImVec2(0.0f, ImGui::GetFontSize() * 0.5f));
+    push_heading_font();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(title);
+    ImGui::PopFont();
+}
+
+inline void section_heading(const std::string& title, bool first = false) { section_heading(title.c_str(), first); }
+
+// Text drawn at the right edge of the line, after SameLine.
+inline void same_line_right(float width) {
+    const float x = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - width;
+    ImGui::SameLine(std::max(x, ImGui::GetCursorPosX()));
+}
+
+// SameLine if an item `width` wide still fits after the last item;
+// otherwise the next item starts a new line.
+inline void same_line_if_fits(float width) {
+    // Called after an item: the cursor is at the start of the next line.
+    const float right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+    if (ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x + width <= right) ImGui::SameLine();
+}
+
+// The width of Button(label) or SmallButton(label), which pads only less
+// vertically.
+inline float button_width(const char* label) {
+    return ImGui::CalcTextSize(label, nullptr, true).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+}
+
+// Text that fits `width`, shortened with "..." at the end if need be.
+inline std::string fit_text(const std::string& text, float width) {
+    if (ImGui::CalcTextSize(text.c_str()).x <= width) return text;
+    const float dots = ImGui::CalcTextSize("...").x;
+    size_t n = text.size();
+    while (n > 0) {
+        --n;
+        while (n > 0 && (static_cast<unsigned char>(text[n]) & 0xC0) == 0x80) --n;  // UTF-8 boundary
+        if (ImGui::CalcTextSize(text.c_str(), text.c_str() + n).x + dots <= width) break;
+    }
+    return text.substr(0, n) + "...";
+}
+
 // One row of a two-column form table: the label, then the widget in the
 // second column at full width.
 inline void form_row(const char* label) {

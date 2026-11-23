@@ -24,6 +24,7 @@ void App::init(const std::filesystem::path& prefDir, const std::filesystem::path
     load_settings();
     const auto model = model_;
     set_model(model);
+    stale_ = batchStale_ = false;
     // Show the options folded only when they hold nothing unusual.
     openFitOptions_ = !fit_settings_are_default();
 }
@@ -50,10 +51,15 @@ void App::load_settings() {
     report_.newFile = report_.file.empty() || !std::filesystem::exists(report_.file);
     report_.nextNumber = o.startNumber;
     numberPoints_ = s.get_bool("plot.numberPoints", true);
+    showFittedValues_ = s.get_bool("plot.fittedValues", true);
+    residualStrip_ = s.get_bool("plot.residualStrip", true);
+    xUnit_ = s.get("data.xUnit");
+    yUnit_ = s.get("data.yUnit");
     import_.negativeIsMissing = s.get_bool("import.negativeIsMissing", true);
     import_.mpaCount = std::max(1, s.get_int("import.mpaCount", 8));
     if (auto t = theme_from_name(s.get("view.theme", "system"))) set_theme(*t);
     set_text_scale(s.get_int("view.textSize", 100));
+    leftWidthEm_ = static_cast<float>(s.get_int("view.leftWidth", 260)) / 10.0f;
 }
 
 void App::save_settings() const {
@@ -72,10 +78,15 @@ void App::save_settings() const {
     s.set_int("report.start", o.startNumber);
     s.set("report.file", report_.file.string());
     s.set_bool("plot.numberPoints", numberPoints_);
+    s.set_bool("plot.fittedValues", showFittedValues_);
+    s.set_bool("plot.residualStrip", residualStrip_);
+    s.set("data.xUnit", xUnit_);
+    s.set("data.yUnit", yUnit_);
     s.set_bool("import.negativeIsMissing", import_.negativeIsMissing);
     s.set_int("import.mpaCount", import_.mpaCount);
     s.set("view.theme", theme_name(theme_choice()));
     s.set_int("view.textSize", textScale_);
+    s.set_int("view.leftWidth", static_cast<int>(std::lround(leftWidthEm_ * 10.0f)));
     std::error_code ec;
     std::filesystem::create_directories(prefDir_, ec);
     if (s.save(prefDir_ / "kinetics.ini")) persist_file(prefDir_ / "kinetics.ini");
@@ -89,6 +100,20 @@ std::string App::default_dir() const {
     return {};
 }
 
+void App::show_window(const std::string& name) {
+    if (name == "help") showHelp_ = true;
+    else if (name == "about") openAbout_ = true;
+    else if (name == "report-options") openReportOptions_ = true;
+    else if (name == "fit-options") openFitOptions_ = true;
+    else if (name == "graph") {
+        requestedTab_ = Tab::Results;
+        scrollToPlot_ = true;
+    } else if (name == "residuals") {
+        requestedTab_ = Tab::Results;
+        openResiduals_ = true;
+    }
+}
+
 // ===========================================================================
 // Model and data
 // ===========================================================================
@@ -100,7 +125,7 @@ void App::set_model(kin::ModelId id) {
     if (std::find(plots.begin(), plots.end(), plotType_) == plots.end()) plotType_ = kin::PlotType::Normal;
     plotOptions_ = kin::default_plot_options(plotType_, id);
     refitPlot_ = true;
-    if (analysis_) mark_stale();
+    mark_stale();
 }
 
 void App::set_plot_type(kin::PlotType t) {
@@ -118,24 +143,18 @@ bool App::v0_measured() const {
 }
 
 bool App::results_stale() const {
-    // While a run from the file analysis is shown, the table's state does not
-    // apply to it.
-    return analysis_ && stale_ && !(batch_.selected >= 0 && analysisRun_);
+    if (!analysis_) return false;
+    return showing_run() ? batchStale_ : stale_;
 }
 
 void App::close_import() {
-    const bool showingRun = batch_.selected >= 0 && analysisRun_.has_value();
+    leave_run_view();  // back to the table's own results
     ImportState fresh;
     fresh.negativeIsMissing = import_.negativeIsMissing;  // preferences, not the file
     fresh.mpaCount = import_.mpaCount;
     import_ = std::move(fresh);
     batch_ = BatchState{};
-    // Results of one of the file's runs go with the file.
-    if (showingRun) {
-        analysis_.reset();
-        analysisRun_.reset();
-        stale_ = false;
-    }
+    batchStale_ = false;
 }
 
 std::string App::report_file_tooltip() const {
@@ -227,19 +246,58 @@ std::vector<kin::Point> App::table_points(int* invalidCells) const {
 }
 
 void App::set_table(const std::vector<kin::Point>& pts) {
+    leave_run_view();  // what changes is the table, so show it
     rows_.clear();
     for (const auto& p : pts) rows_.push_back({number_text(p.x), number_text(p.y)});
     rows_.push_back({});
-    mark_stale();
+    mark_table_changed();
 }
 
 void App::set_table_y(const std::vector<double>& ys) {
+    leave_run_view();
     // Keep existing X values (MPA files carry velocities only).
     while (!rows_.empty() && rows_.back().x.empty() && rows_.back().y.empty()) rows_.pop_back();
     if (rows_.size() < ys.size()) rows_.resize(ys.size());
     for (size_t i = 0; i < rows_.size(); ++i) rows_[i].y = i < ys.size() ? number_text(ys[i]) : std::string();
     rows_.push_back({});
-    mark_stale();
+    mark_table_changed();
+}
+
+void App::sort_table() {
+    auto pts = table_points();
+    std::stable_sort(pts.begin(), pts.end(), [](const kin::Point& a, const kin::Point& b) {
+        if (std::isnan(a.x)) return false;
+        if (std::isnan(b.x)) return true;
+        return a.x < b.x || (a.x == b.x && a.y < b.y);
+    });
+    set_table(pts);
+}
+
+App::TableSnapshot App::snapshot_table() const {
+    TableSnapshot s;
+    s.rows = rows_;
+    while (!s.rows.empty() && s.rows.back().x.empty() && s.rows.back().y.empty()) s.rows.pop_back();
+    s.source = dataSource_;
+    s.run = dataRun_;
+    s.analysis = analysis_;
+    s.analysisRun = analysisRun_;
+    s.stale = stale_;
+    return s;
+}
+
+void App::restore_table(TableSnapshot s) {
+    leave_run_view();
+    rows_ = std::move(s.rows);
+    rows_.push_back({});
+    mark_table_changed();  // also closes the message
+    dataSource_ = std::move(s.source);
+    dataRun_ = s.run;
+    // The same data and results as before, so they are as current as they were.
+    analysis_ = std::move(s.analysis);
+    analysisRun_ = s.analysisRun;
+    stale_ = s.stale;
+    reportWritten_ = false;
+    refitPlot_ = true;
 }
 
 void App::paste_table_from_clipboard() {
@@ -264,12 +322,12 @@ void App::apply_pasted_text(const std::string& text) {
 void App::open_table_file(const std::filesystem::path& path) {
     const auto text = kin::read_text_file(path);
     if (!text) {
-        error("Can't open " + path.string());
+        error("Can't open " + path.filename().string() + ".", path.string());
         return;
     }
     const auto pts = kin::parse_xy_table(*text);
     if (pts.empty()) {
-        error(path.filename().string() + " does not contain two columns of numbers.");
+        error(path.filename().string() + " does not contain two columns of numbers.", path.string());
         return;
     }
     set_table(pts);
@@ -299,6 +357,7 @@ void App::open_example(Example e) {
         dataSource_ = "[I] values for the MPA example";
         import_mpa(ex / "mpa_plate.txt");
         load_selected_run_into_table();
+        notice_.reset();  // nothing of the user's was replaced
         break;
     }
 }
@@ -306,12 +365,32 @@ void App::open_example(Example e) {
 void App::save_table(const std::filesystem::path& path) {
     const auto& def = kin::model_def(model_);
     if (!kin::write_text_file(path, kin::format_xy_table(table_points(), def.xName, def.yName), false)) {
-        error("Can't write " + path.string());
+        error("Can't write " + path.filename().string() + ".", path.string());
         return;
     }
     tablePath_ = path;
     dataSource_ = path.filename().string();
     file_written(path);
+}
+
+// ===========================================================================
+// Units
+// ===========================================================================
+
+std::string App::unit_of(kin::Role role, kin::ModelId model) const {
+    return kin::parameter_unit(model, role, xUnit_, yUnit_);
+}
+
+std::string App::x_heading(kin::ModelId model) const {
+    const auto& def = kin::model_def(model);
+    const bool fixedUnit = def.family == kin::Family::Arrhenius;  // T (°C)
+    return std::string(def.xName) + (xUnit_.empty() || fixedUnit ? std::string() : " (" + xUnit_ + ")");
+}
+
+std::string App::y_heading(kin::ModelId model) const {
+    const auto& def = kin::model_def(model);
+    const bool log = def.family == kin::Family::Arrhenius;  // log10(v)
+    return std::string(def.yName) + (yUnit_.empty() || log ? std::string() : " (" + yUnit_ + ")");
 }
 
 // ===========================================================================
@@ -330,6 +409,14 @@ kin::AnalysisRequest App::make_request(std::vector<kin::Point> data) const {
 }
 
 void App::request_fit() {
+    // F5 fits what is on screen: while a file run is shown, the file's runs,
+    // once the settings have changed (fitting them again unchanged would only
+    // repeat any reports).
+    if (showing_run()) {
+        if (batchStale_) refit_runs();
+        else info("The runs are already fitted with these settings. To fit your own table, press Back to my table.");
+        return;
+    }
     const auto pts = kin::clean_data(table_points());
     if (pts.empty()) {
         // A note above the table says what to do, and the cursor goes there.
@@ -345,8 +432,8 @@ void App::request_fit() {
 }
 
 void App::fit_now() {
+    leave_run_view();
     apply_analysis(kin::analyse(make_request(table_points())), dataRun_);
-    batch_.selected = -1;
 }
 
 void App::apply_analysis(kin::AnalysisOutcome outcome, std::optional<int> runNumber) {
@@ -357,7 +444,9 @@ void App::apply_analysis(kin::AnalysisOutcome outcome, std::optional<int> runNum
     analysis_ = std::move(outcome.analysis);
     analysisRun_ = runNumber;
     stale_ = false;
+    reportWritten_ = false;
     refitPlot_ = true;
+    notice_.reset();
     const auto plots = kin::available_plots(analysis_->model());
     if (std::find(plots.begin(), plots.end(), plotType_) == plots.end()) set_plot_type(kin::PlotType::Normal);
     // A fit that did not converge may need other options: show them.
@@ -371,14 +460,15 @@ void App::apply_analysis(kin::AnalysisOutcome outcome, std::optional<int> runNum
 void App::import_spreadsheet(const std::filesystem::path& path) {
     const auto text = kin::read_text_file(path);
     if (!text) {
-        error("Can't open " + path.string());
+        error("Can't open " + path.filename().string() + ".", path.string());
         return;
     }
     auto parsed = kin::parse_spreadsheet(*text);
     if (!parsed.file) {
-        error(path.filename().string() + ": " + parsed.error);
+        error(path.filename().string() + ": " + parsed.error, path.string());
         return;
     }
+    leave_run_view();
     import_.type = ImportType::Spreadsheet;
     import_.path = path;
     import_.sheet = std::move(parsed.file);
@@ -386,26 +476,33 @@ void App::import_spreadsheet(const std::filesystem::path& path) {
     import_.selectedRun = import_.sheet->runs.front().number;
     batch_ = BatchState{};
     batch_.firstRun = import_.selectedRun;
+    batchStale_ = false;
     requestedTab_ = Tab::FileRuns;
 }
 
 void App::import_mpa(const std::filesystem::path& path) {
     const auto text = kin::read_text_file(path);
     if (!text) {
-        error("Can't open " + path.string());
+        error("Can't open " + path.filename().string() + ".", path.string());
         return;
     }
+    leave_run_view();
     import_.type = ImportType::Mpa;
     import_.path = path;
     import_.sheet.reset();
     import_.mpaText = *text;
     import_.selectedRun = 1;
     batch_ = BatchState{};
+    batchStale_ = false;
     requestedTab_ = Tab::FileRuns;
 }
 
 bool App::load_selected_run_into_table() {
     const auto name = import_.path.filename().string();
+    leave_run_view();
+    // The table it replaces can be put back from the status bar.
+    const auto before = snapshot_table();
+    std::string what;
     if (import_.type == ImportType::Spreadsheet) {
         const auto* run = import_.sheet->find_run(import_.selectedRun);
         if (!run) {
@@ -415,9 +512,8 @@ bool App::load_selected_run_into_table() {
         set_table(import_.sheet->points(*run, import_.negativeIsMissing));
         dataSource_ = "Run #" + std::to_string(run->number) + " of " + name;
         dataRun_ = run->number;
-        return true;
-    }
-    if (import_.type == ImportType::Mpa) {
+        what = "Run #" + std::to_string(run->number);
+    } else if (import_.type == ImportType::Mpa) {
         const auto ds = kin::parse_mpa_dataset(import_.mpaText, import_.selectedRun, import_.mpaCount);
         if (!ds.error.empty()) {
             error(name + ": " + ds.error);
@@ -426,21 +522,34 @@ bool App::load_selected_run_into_table() {
         set_table_y(ds.y);
         dataSource_ = "Dataset #" + std::to_string(import_.selectedRun) + " of " + name + " (velocities)";
         dataRun_ = import_.selectedRun;
-        return true;
+        what = "The velocities of dataset #" + std::to_string(import_.selectedRun);
+    } else {
+        error("No file is imported. Use File > Import spreadsheet file of runs, or Import plate-reader file.");
+        return false;
     }
-    error("No file is imported. Use File > Import spreadsheet file of runs, or Import plate-reader file.");
-    return false;
+    if (!before.rows.empty()) {
+        Notice n;
+        n.text = what + " of " + name + " copied into the table.";
+        n.undo = before;
+        n.undoTooltip = "Put back the table as it was";
+        notice_ = std::move(n);
+    }
+    return true;
 }
 
 void App::fit_selected_run() {
-    if (load_selected_run_into_table()) request_fit();
+    if (!load_selected_run_into_table()) return;
+    const auto undo = std::exchange(notice_, std::nullopt);
+    request_fit();
+    if (!notice_ && undo) notice_ = undo;  // keep the Undo unless the fit had something to say
 }
 
 void App::analyse_all_runs() {
     const auto tmpl = make_request({});
+    std::vector<kin::BatchItem> items;
     if (import_.type == ImportType::Spreadsheet) {
-        batch_.items = kin::analyse_spreadsheet_runs(*import_.sheet, batch_.firstRun, tmpl, import_.negativeIsMissing);
-        if (batch_.items.empty()) {
+        items = kin::analyse_spreadsheet_runs(*import_.sheet, batch_.firstRun, tmpl, import_.negativeIsMissing);
+        if (items.empty()) {
             error("Run #" + std::to_string(batch_.firstRun) + " not found in " + import_.path.filename().string() + ".");
             return;
         }
@@ -459,8 +568,8 @@ void App::analyse_all_runs() {
             return;
         }
         xs.resize(static_cast<size_t>(import_.mpaCount));
-        batch_.items = kin::analyse_mpa_datasets(import_.mpaText, batch_.firstRun, import_.mpaCount, xs, tmpl);
-        if (batch_.items.empty()) {
+        items = kin::analyse_mpa_datasets(import_.mpaText, batch_.firstRun, import_.mpaCount, xs, tmpl);
+        if (items.empty()) {
             error("Dataset #" + std::to_string(batch_.firstRun) + " not found in " + import_.path.filename().string() + ".");
             return;
         }
@@ -468,6 +577,11 @@ void App::analyse_all_runs() {
         error("No file is imported. Use File > Import spreadsheet file of runs, or Import plate-reader file.");
         return;
     }
+    // The new list replaces the one any shown run came from.
+    leave_run_view();
+    batch_.items = std::move(items);
+    batch_.selected = -1;
+    batchStale_ = false;
     int ok = 0;
     for (const auto& it : batch_.items) ok += it.analysis.has_value();
     batch_.status = "Analysed " + std::to_string(batch_.items.size()) + " run(s): " + std::to_string(ok) + " fitted";
@@ -484,29 +598,76 @@ void App::analyse_all_runs() {
 
 void App::show_batch_item(int index) {
     if (index < 0 || index >= static_cast<int>(batch_.items.size())) return;
+    // The table's own fit waits while the run is shown.
+    if (!tableResult_) tableResult_ = TableResult{analysis_, analysisRun_};
     batch_.selected = index;
     const auto& item = batch_.items[static_cast<size_t>(index)];
-    if (!item.analysis) return;
-    analysis_ = item.analysis;
+    analysis_ = item.analysis;  // empty for a run that could not be fitted
     analysisRun_ = item.runNumber;
-    stale_ = false;
+    import_.selectedRun = item.runNumber;
+    reportWritten_ = false;
     refitPlot_ = true;
+}
+
+void App::leave_run_view() {
+    if (!tableResult_) {
+        batch_.selected = -1;
+        return;
+    }
+    analysis_ = std::move(tableResult_->analysis);
+    analysisRun_ = tableResult_->run;
+    tableResult_.reset();
+    batch_.selected = -1;
+    reportWritten_ = false;
+    refitPlot_ = true;
+}
+
+void App::refit_runs() {
+    const int shown = batch_.selected;
+    analyse_all_runs();
+    if (shown >= 0 && shown < static_cast<int>(batch_.items.size())) show_batch_item(shown);
+}
+
+void App::edit_shown_run_in_table() {
+    const auto* item = shown_item();
+    if (!item) return;
+    const auto analysis = item->analysis;
+    const int run = item->runNumber;
+    const bool stale = batchStale_;
+    import_.selectedRun = run;
+    if (!load_selected_run_into_table()) return;
+    // The table now holds the run's points, so the run's fit is the table's.
+    const auto undo = std::exchange(notice_, std::nullopt);
+    if (analysis) {
+        analysis_ = analysis;
+        analysisRun_ = run;
+        stale_ = stale;
+        refitPlot_ = true;
+    }
+    notice_ = undo;
 }
 
 // ===========================================================================
 // Reports
 // ===========================================================================
 
-std::string App::current_report_text(bool forFile) const {
-    if (!analysis_) return {};
+kin::ReportContext App::report_context(std::optional<int> runNumber, bool firstInFile) const {
     kin::ReportContext ctx;
     ctx.sequenceNumber = report_.nextNumber;
-    ctx.runNumber = analysisRun_;
+    ctx.runNumber = runNumber;
     ctx.today = kin::today_string();
-    ctx.firstInFile = forFile ? (report_.newFile || !std::filesystem::exists(report_.file) ||
-                                 std::filesystem::file_size(report_.file) == 0)
-                              : true;
-    return kin::format_report(*analysis_, report_.options, ctx);
+    ctx.firstInFile = firstInFile;
+    ctx.xUnit = xUnit_;
+    ctx.yUnit = yUnit_;
+    return ctx;
+}
+
+std::string App::current_report_text(bool forFile) const {
+    if (!analysis_) return {};
+    const bool first = forFile ? (report_.newFile || !std::filesystem::exists(report_.file) ||
+                                  std::filesystem::file_size(report_.file) == 0)
+                               : true;
+    return kin::format_report(*analysis_, report_.options, report_context(analysisRun_, first));
 }
 
 void App::choose_report_file() {
@@ -517,14 +678,9 @@ void App::choose_report_file() {
 bool App::append_report(const kin::Analysis& a, std::optional<int> runNumber) {
     std::error_code ec;
     const bool empty = !std::filesystem::exists(report_.file, ec) || std::filesystem::file_size(report_.file, ec) == 0;
-    kin::ReportContext ctx;
-    ctx.sequenceNumber = report_.nextNumber;
-    ctx.runNumber = runNumber;
-    ctx.today = kin::today_string();
-    ctx.firstInFile = report_.newFile || empty;
-    const auto text = kin::format_report(a, report_.options, ctx);
+    const auto text = kin::format_report(a, report_.options, report_context(runNumber, report_.newFile || empty));
     if (!kin::write_text_file(report_.file, text, !report_.newFile)) {
-        error("Can't write the report file " + report_.file.string());
+        error("Can't write the report file " + report_.file.filename().string() + ".", report_.file.string());
         return false;
     }
     report_.newFile = false;
@@ -547,6 +703,8 @@ void App::write_report() {
         report_.status = "Report" + (report_.options.numbering == kin::Numbering::Sequential ? " #" + std::to_string(number) : std::string()) +
                          " written to " + report_.file.filename().string() + ".";
         file_written(report_.file);
+        reportWritten_ = true;
+        info(report_.status, report_.file.string());  // seen from any tab (Alt+P)
     }
 }
 
@@ -574,15 +732,62 @@ void App::copy_report() {
     }
     ImGui::SetClipboardText(text.c_str());
     report_.status = "Report copied to the clipboard.";
+    info(report_.status);
+}
+
+void App::copy_results() {
+    if (!analysis_) return;
+    const auto& a = *analysis_;
+    const auto& def = kin::model_def(a.model());
+    // A short table with every digit, tab-separated for a spreadsheet.
+    std::string t = plain_model_label(a.model(), a.request.params) + ", " + std::to_string(a.fit.n) + " points";
+    if (analysisRun_) t += ", run #" + std::to_string(*analysisRun_);
+    t += "\nParameter\tValue\tSD\tRelative SD (%)\tUnit\n";
+    const auto rows = a.parameter_rows();
+    for (size_t i = 0; i < rows.size(); ++i) {
+        const auto& r = rows[i];
+        t += r.name + "\t" + kin::fmt_g(r.value) + "\t";
+        if (r.fixed) t += "(fixed)\t";
+        else t += kin::fmt_g(r.sd) + "\t" + (r.value != 0.0 ? kin::fmt_g(std::fabs(r.sd * 100.0 / r.value), 3) : "");
+        t += "\t";
+        if (i < def.params.size()) t += unit_of(def.params[i].role, a.model());
+        t += "\n";
+    }
+    t += "Residual SD\t" + kin::fmt_g(a.fit.stdDev) + "\t\t\t" + (def.family == kin::Family::Arrhenius ? "" : yUnit_) + "\n";
+    ImGui::SetClipboardText(t.c_str());
+    info("Results copied to the clipboard, as a table for a spreadsheet.");
+}
+
+void App::clear_table() {
+    leave_run_view();
+    auto before = snapshot_table();
+    if (before.rows.empty()) return;  // nothing to clear
+    const size_t count = before.rows.size();
+    set_table({});
+    dataSource_ = "Entered by hand";
+    dataRun_.reset();
+    Notice n;
+    n.text = "Cleared the table (" + std::to_string(count) + " row" + (count == 1 ? "" : "s") + ").";
+    n.undo = std::move(before);
+    n.undoTooltip = "Put the cleared rows back";
+    notice_ = std::move(n);  // after set_table, which dismisses messages
 }
 
 // ===========================================================================
-// Dialog results, errors
+// Dialog results, messages
 // ===========================================================================
 
-void App::error(const std::string& message) {
-    errorText_ = message;
-    openError_ = true;
+void App::error(const std::string& message, const std::string& detail) {
+    notice_ = Notice{};
+    notice_->isError = true;
+    notice_->text = message;
+    notice_->detail = detail;
+}
+
+void App::info(const std::string& message, const std::string& detail) {
+    notice_ = Notice{};
+    notice_->text = message;
+    notice_->detail = detail;
 }
 
 void App::handle_file_results() {
@@ -600,6 +805,7 @@ void App::handle_file_results() {
                 std::error_code ec;
                 report_.newFile = !std::filesystem::exists(path, ec);
                 report_.nextNumber = report_.options.startNumber;
+                save_settings();  // at once: a browser tab may be closed without a save
                 const auto pending = pendingReport_;
                 pendingReport_ = PendingReport::None;
                 if (pending == PendingReport::Current) write_report();
@@ -607,267 +813,6 @@ void App::handle_file_results() {
                 break;
             }
         }
-    }
-}
-
-// ===========================================================================
-// Frame
-// ===========================================================================
-
-bool App::frame() {
-    handle_file_results();
-    handle_shortcuts();
-
-    const ImGuiViewport* vp = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(vp->WorkPos);
-    ImGui::SetNextWindowSize(vp->WorkSize);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
-                                   ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_MenuBar |
-                                   ImGuiWindowFlags_NoBringToFrontOnFocus;
-    ImGui::Begin("Kinetics##main", nullptr, flags);
-    ImGui::PopStyleVar(2);
-
-    draw_menu_bar();
-    draw_header();
-
-    if (ImGui::BeginTable("##layout", 2, ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersInnerV,
-                          ImGui::GetContentRegionAvail())) {
-        ImGui::TableSetupColumn("left", ImGuiTableColumnFlags_WidthStretch, 0.38f);
-        ImGui::TableSetupColumn("right", ImGuiTableColumnFlags_WidthStretch, 0.62f);
-        ImGui::TableNextRow();
-        ImGui::TableNextColumn();
-        if (ImGui::BeginChild("##left", ImVec2(0, 0), ImGuiChildFlags_None)) draw_left_panel();
-        ImGui::EndChild();
-        ImGui::TableNextColumn();
-        if (ImGui::BeginChild("##right", ImVec2(0, 0), ImGuiChildFlags_None)) draw_right_panel();
-        ImGui::EndChild();
-        ImGui::EndTable();
-    }
-    ImGui::End();
-
-    draw_dialogs();
-    draw_help_window();
-    return !quit_;
-}
-
-void App::draw_header() {
-    const auto desc = plain_model_label(model_, params_);
-    int invalid = 0;
-    const auto pts = kin::clean_data(table_points(&invalid));
-    ImGui::TextUnformatted(desc.c_str());
-    ImGui::SameLine();
-    ImGui::TextDisabled("|");
-    ImGui::SameLine();
-    ImGui::Text("Data: %s, %zu point%s", dataSource_.c_str(), pts.size(), pts.size() == 1 ? "" : "s");
-    if (invalid > 0) {
-        ImGui::SameLine();
-        ImGui::TextColored(palette().warning, "(%d cell%s not a number)", invalid, invalid == 1 ? "" : "s");
-    }
-    if (import_.type != ImportType::None) {
-        ImGui::SameLine();
-        ImGui::TextDisabled("|");
-        ImGui::SameLine();
-        ImGui::Text("File: %s", import_.path.filename().string().c_str());
-    }
-    ImGui::Separator();
-}
-
-void App::draw_menu_bar() {
-    if (!ImGui::BeginMenuBar()) return;
-    const bool haveFit = analysis_.has_value();
-    const bool haveImport = import_.type != ImportType::None;
-
-    if (ImGui::BeginMenu("File")) {
-        if (ImGui::MenuItem("Open data table...", "Ctrl+O")) show_open_dialog(FilePurpose::OpenTable, default_dir());
-        if (ImGui::MenuItem("Save data table...", "Ctrl+S"))
-            show_save_dialog(FilePurpose::SaveTable, tablePath_.empty() ? default_dir() + "data.csv" : tablePath_.string());
-        ImGui::Separator();
-        if (ImGui::MenuItem("Import spreadsheet file of runs..."))
-            show_open_dialog(FilePurpose::ImportSpreadsheet, default_dir());
-        ImGui::SetItemTooltip("Concentrations, then one row of velocities per run");
-        if (ImGui::MenuItem("Import plate-reader file (MPA, velocities only)..."))
-            show_open_dialog(FilePurpose::ImportMpa, default_dir());
-        if (ImGui::MenuItem("Close imported file", nullptr, false, haveImport)) close_import();
-        if (ImGui::BeginMenu("Open example")) {
-            if (ImGui::MenuItem("Michaelis-Menten data table")) open_example(Example::MichaelisMenten);
-            if (ImGui::MenuItem("Arrhenius data table")) open_example(Example::Arrhenius);
-            if (ImGui::MenuItem("Spreadsheet file with four runs (Hill)")) open_example(Example::SpreadsheetRuns);
-            if (ImGui::MenuItem("MPA file with two datasets (inhibition)")) open_example(Example::MpaPlate);
-            ImGui::EndMenu();
-        }
-        ImGui::Separator();
-        if (ImGui::MenuItem("Report options...", "Alt+O")) openReportOptions_ = true;
-        if (ImGui::MenuItem("Write report", "Alt+P", false, haveFit)) write_report();
-        if (ImGui::MenuItem("Copy report to clipboard", nullptr, false, haveFit)) copy_report();
-        if (!kIsWeb) {  // a browser tab is closed by the browser
-            ImGui::Separator();
-            if (ImGui::MenuItem("Quit", "Alt+Q")) quit_ = true;
-        }
-        ImGui::EndMenu();
-    }
-    if (ImGui::BeginMenu("Edit")) {
-        if (ImGui::BeginMenu("Equation", true)) {
-            for (const auto& m : kin::all_models()) {
-                const std::string label = std::string(1, m.letter) + ". " + std::string(m.menuName);
-                if (ImGui::MenuItem(label.c_str(), nullptr, m.id == model_) && m.id != model_) set_model(m.id);
-            }
-            ImGui::EndMenu();
-        }
-        ImGui::SetItemTooltip("Alt+T");
-        if (ImGui::MenuItem("Enter/edit data", "Alt+D")) focusTable_ = true;
-        if (ImGui::MenuItem("Load imported run into table", "Alt+M", false, haveImport)) load_selected_run_into_table();
-        ImGui::Separator();
-        if (ImGui::MenuItem("Paste data from clipboard")) paste_table_from_clipboard();
-        if (ImGui::MenuItem("Sort data")) {
-            auto pts = table_points();
-            std::stable_sort(pts.begin(), pts.end(), [](const kin::Point& a, const kin::Point& b) {
-                if (std::isnan(a.x)) return false;
-                if (std::isnan(b.x)) return true;
-                return a.x < b.x || (a.x == b.x && a.y < b.y);
-            });
-            set_table(pts);
-        }
-        if (ImGui::MenuItem("Clear data")) {
-            set_table({});
-            dataSource_ = "Entered by hand";
-            dataRun_.reset();
-        }
-        ImGui::EndMenu();
-    }
-    if (ImGui::BeginMenu("Calculate")) {
-        const auto& def = kin::model_def(analysis_ ? analysis_->model() : model_);
-        const std::string xName(def.xName), yName(def.yName);
-        if (ImGui::MenuItem("Fit table data", "F5 / Alt+R")) request_fit();
-        if (ImGui::MenuItem("Fit the selected file run", "Alt+S", false, haveImport)) fit_selected_run();
-        if (ImGui::MenuItem("Fit all file runs", "Alt+A", false, haveImport)) {
-            requestedTab_ = Tab::FileRuns;
-            analyse_all_runs();
-        }
-        if (ImGui::MenuItem("Show file runs", "Alt+W", false, haveImport)) requestedTab_ = Tab::FileRuns;
-        ImGui::Separator();
-        if (ImGui::MenuItem(("Find " + xName + " for a given " + yName + "...").c_str(), "Alt+X", false, haveFit)) {
-            requestedTab_ = Tab::StandardCurve;
-            focusStdX_ = true;
-        }
-        if (ImGui::MenuItem(("Find " + yName + " for a given " + xName + "...").c_str(), "Alt+Y", false, haveFit)) {
-            requestedTab_ = Tab::StandardCurve;
-            focusStdY_ = true;
-        }
-        ImGui::Separator();
-        ImGui::TextDisabled("Initial estimates");
-        if (ImGui::MenuItem("Automatic", nullptr, guess_ == kin::GuessMode::Automatic)) {
-            guess_ = kin::GuessMode::Automatic;
-            mark_stale();
-        }
-        if (ImGui::MenuItem("Manual (values in the parameter table)", nullptr, guess_ == kin::GuessMode::Manual)) {
-            guess_ = kin::GuessMode::Manual;
-            mark_stale();
-            openFitOptions_ = true;  // the estimates are entered there
-        }
-        ImGui::TextDisabled("Fitting method");
-        if (ImGui::MenuItem("Marquardt-Levenberg", nullptr, method_ == kin::Method::Marquardt)) {
-            method_ = kin::Method::Marquardt;
-            mark_stale();
-        }
-        if (ImGui::MenuItem("Gauss-Newton", nullptr, method_ == kin::Method::GaussNewton)) {
-            method_ = kin::Method::GaussNewton;
-            mark_stale();
-        }
-        ImGui::EndMenu();
-    }
-    if (ImGui::BeginMenu("View")) {
-        // The tabs other than Results appear once they have something to show.
-        if (ImGui::MenuItem("Results", "Alt+L")) requestedTab_ = Tab::Results;
-        if (ImGui::MenuItem("Graph", "Alt+G", false, haveFit)) requestedTab_ = Tab::Graph;
-        if (ImGui::MenuItem("Residuals", "Alt+I", false, haveFit)) requestedTab_ = Tab::Residuals;
-        if (ImGui::MenuItem("Standard curve", nullptr, false, haveFit)) requestedTab_ = Tab::StandardCurve;
-        if (ImGui::MenuItem("File runs", nullptr, false, haveImport)) requestedTab_ = Tab::FileRuns;
-        if (ImGui::MenuItem("Report", nullptr, false, haveFit)) requestedTab_ = Tab::Report;
-        ImGui::Separator();
-        if (ImGui::MenuItem("Classic interface (v3.51)", "Ctrl+F12")) classicRequested_ = true;
-        if (ImGui::BeginMenu("Text size")) {
-            if (ImGui::MenuItem("Larger", "Ctrl+=", false, textScale_ < kTextScales.back())) step_text_scale(+1);
-            if (ImGui::MenuItem("Smaller", "Ctrl+-", false, textScale_ > kTextScales.front())) step_text_scale(-1);
-            ImGui::Separator();
-            for (int pct : kTextScales) {
-                const std::string label = std::to_string(pct) + "%";
-                if (ImGui::MenuItem(label.c_str(), pct == 100 ? "Ctrl+0" : nullptr, textScale_ == pct) && pct != textScale_) {
-                    set_text_scale(pct);
-                    save_settings();
-                }
-            }
-            ImGui::EndMenu();
-        }
-        if (ImGui::BeginMenu("Theme")) {
-            const ThemeChoice now = theme_choice();
-            for (const auto& [choice, label] : {std::pair{ThemeChoice::Dark, "Dark"},
-                                                std::pair{ThemeChoice::Light, "Light"},
-                                                std::pair{ThemeChoice::System, "Same as the system"}})
-                if (ImGui::MenuItem(label, nullptr, now == choice) && choice != now) {
-                    set_theme(choice);
-                    save_settings();
-                }
-            ImGui::EndMenu();
-        }
-        ImGui::EndMenu();
-    }
-    if (ImGui::BeginMenu("Help")) {
-        const auto topics = help_topics();
-        for (int i = 0; i < static_cast<int>(topics.size()); ++i)
-            if (ImGui::MenuItem(topics[static_cast<size_t>(i)].title, i == 0 ? "Alt+H / F1" : nullptr)) {
-                showHelp_ = true;
-                helpTopic_ = i;
-            }
-        ImGui::Separator();
-        if (ImGui::MenuItem("About Kinetics")) openAbout_ = true;
-        ImGui::EndMenu();
-    }
-    ImGui::EndMenuBar();
-}
-
-void App::handle_shortcuts() {
-    using namespace ImGui;
-    constexpr ImGuiInputFlags g = ImGuiInputFlags_RouteGlobal;
-    const bool haveImport = import_.type != ImportType::None;
-    if (Shortcut(ImGuiMod_Alt | ImGuiKey_Q, g) && !kIsWeb) quit_ = true;
-    if (Shortcut(ImGuiMod_Alt | ImGuiKey_O, g)) openReportOptions_ = true;
-    if (Shortcut(ImGuiMod_Alt | ImGuiKey_P, g)) write_report();
-    if (Shortcut(ImGuiMod_Alt | ImGuiKey_T, g)) focusModel_ = true;
-    if (Shortcut(ImGuiMod_Alt | ImGuiKey_D, g)) focusTable_ = true;
-    if (Shortcut(ImGuiMod_Alt | ImGuiKey_M, g)) load_selected_run_into_table();
-    if (Shortcut(ImGuiMod_Alt | ImGuiKey_R, g) || Shortcut(ImGuiKey_F5, g)) request_fit();
-    if (Shortcut(ImGuiMod_Alt | ImGuiKey_S, g)) fit_selected_run();
-    if (Shortcut(ImGuiMod_Alt | ImGuiKey_A, g) && haveImport) {
-        requestedTab_ = Tab::FileRuns;
-        analyse_all_runs();
-    }
-    if (Shortcut(ImGuiMod_Alt | ImGuiKey_W, g)) requestedTab_ = Tab::FileRuns;
-    if (Shortcut(ImGuiMod_Alt | ImGuiKey_X, g)) {
-        requestedTab_ = Tab::StandardCurve;
-        focusStdX_ = true;
-    }
-    if (Shortcut(ImGuiMod_Alt | ImGuiKey_Y, g)) {
-        requestedTab_ = Tab::StandardCurve;
-        focusStdY_ = true;
-    }
-    if (Shortcut(ImGuiMod_Alt | ImGuiKey_L, g)) requestedTab_ = Tab::Results;
-    if (Shortcut(ImGuiMod_Alt | ImGuiKey_G, g)) requestedTab_ = Tab::Graph;
-    if (Shortcut(ImGuiMod_Alt | ImGuiKey_I, g)) requestedTab_ = Tab::Residuals;
-    if (Shortcut(ImGuiMod_Alt | ImGuiKey_H, g) || Shortcut(ImGuiKey_F1, g)) showHelp_ = true;
-    if (Shortcut(ImGuiMod_Ctrl | ImGuiKey_O, g)) show_open_dialog(FilePurpose::OpenTable, default_dir());
-    if (Shortcut(ImGuiMod_Ctrl | ImGuiKey_S, g))
-        show_save_dialog(FilePurpose::SaveTable, tablePath_.empty() ? default_dir() + "data.csv" : tablePath_.string());
-    // Text size: Ctrl+= (or Ctrl++), Ctrl+-, Ctrl+0, also on the keypad.
-    if (Shortcut(ImGuiMod_Ctrl | ImGuiKey_Equal, g) || Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Equal, g) ||
-        Shortcut(ImGuiMod_Ctrl | ImGuiKey_KeypadAdd, g))
-        step_text_scale(+1);
-    if (Shortcut(ImGuiMod_Ctrl | ImGuiKey_Minus, g) || Shortcut(ImGuiMod_Ctrl | ImGuiKey_KeypadSubtract, g))
-        step_text_scale(-1);
-    if ((Shortcut(ImGuiMod_Ctrl | ImGuiKey_0, g) || Shortcut(ImGuiMod_Ctrl | ImGuiKey_Keypad0, g)) && textScale_ != 100) {
-        set_text_scale(100);
-        save_settings();
     }
 }
 

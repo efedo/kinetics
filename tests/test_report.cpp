@@ -526,3 +526,100 @@ TEST_CASE(report_long_arrhenius_example, "report: LONG report of the Arrhenius e
     CHECK(has("    1 Standard deviation = 0.00985309"));
     CHECK(has("    Run has converged.  # of iterations = " + std::to_string(a.fit.iterations)));
 }
+
+// ---------------------------------------------------------------------------
+// Units: only when the user gives some; otherwise the reports are v3.51's.
+
+namespace {
+
+ReportContext with_units(ReportContext c, const std::string& x, const std::string& y) {
+    c.xUnit = x;
+    c.yUnit = y;
+    return c;
+}
+
+bool has_line(const std::string& text, const std::string& line) {
+    for (const auto& l : split(text))
+        if (l == line) return true;
+    return false;
+}
+
+}  // namespace
+
+TEST_CASE(report_parameter_unit, "report: parameter_unit gives each parameter the unit of X or Y") {
+    const std::string x = "uM", y = "nmol/min";
+    CHECK(parameter_unit(ModelId::MichaelisMenten, Role::HalfSat, x, y) == "uM");
+    CHECK(parameter_unit(ModelId::MichaelisMenten, Role::Vmax, x, y) == "nmol/min");
+    CHECK(parameter_unit(ModelId::HillGt0, Role::HillCoeff, x, y).empty());
+    CHECK(parameter_unit(ModelId::InhibitionK50, Role::Vmin, x, y) == "nmol/min");
+    CHECK(parameter_unit(ModelId::InhibitionK50, Role::V0, x, y) == "nmol/min");
+    CHECK(parameter_unit(ModelId::Linear, Role::Intercept, x, y) == "nmol/min");
+    CHECK(parameter_unit(ModelId::Linear, Role::Slope, x, y) == "nmol/min per uM");
+    // A slope needs both units.
+    CHECK(parameter_unit(ModelId::Linear, Role::Slope, x, "").empty());
+    CHECK(parameter_unit(ModelId::Linear, Role::Slope, "", y).empty());
+    // log10(A), and Ea (named with its unit), take none.
+    CHECK(parameter_unit(ModelId::Arrhenius, Role::LogA, x, y).empty());
+    CHECK(parameter_unit(ModelId::Arrhenius, Role::Ea, x, y).empty());
+    CHECK(parameter_unit(ModelId::MichaelisMenten, Role::HalfSat, "", y).empty());
+}
+
+TEST_CASE(report_units_blank, "report: without units every format is unchanged") {
+    const auto a = make_mm();
+    for (auto f : {ReportFormat::Short, ReportFormat::Medium, ReportFormat::Long})
+        for (auto l : {ReportLayout::Csv, ReportLayout::Text}) {
+            const auto opt = options(f, l);
+            CHECK(format_report(a, opt, with_units(context(3, 7), "", "")) == format_report(a, opt, context(3, 7)));
+            // Arrhenius data have fixed units (degrees C, log10), so units are ignored.
+            const auto arr = make_arrhenius();
+            CHECK(format_report(arr, opt, with_units(context(3, 7), "uM", "nmol/min")) ==
+                  format_report(arr, opt, context(3, 7)));
+        }
+}
+
+TEST_CASE(report_units_short, "report: SHORT headings name the units, in columns wide enough for them") {
+    const auto a = make_mm();
+    CHECK_TEXT(format_report(a, options(ReportFormat::Short, ReportLayout::Csv), with_units(context(3, {}), "uM", "nmol/min")),
+               {"\"#\",\"Km (uM)\",\"sd\",\"Vmax (nmol/min)\",\"sd\"", "3,2.5,0.125,10,0.25", ""});
+    CHECK_TEXT(format_report(a, options(ReportFormat::Short, ReportLayout::Text), with_units(context(3, {}), "uM", "nmol/min")),
+               {"    #       Km (uM)            sd  Vmax (nmol/min)            sd", std::string(64, '-'),
+                "    3           2.5         0.125               10          0.25", ""});
+    // Only the rows after the first: the values alone, as before.
+    CHECK_TEXT(format_report(a, options(ReportFormat::Short, ReportLayout::Csv), with_units(context(4, {}, false), "uM", "")),
+               {"4,2.5,0.125,10,0.25", ""});
+}
+
+TEST_CASE(report_units_medium, "report: MEDIUM headings and parameter names carry the units") {
+    const auto a = make_mm();
+    CHECK_TEXT(format_report(a, options(ReportFormat::Medium, ReportLayout::Csv), with_units(context(3, {}), "uM", "nmol/min")),
+               {"\"#\",\"[S] (uM)\",\"v (nmol/min)\",\"PARM\",\"VALUE\",\"SD\"", "3,0.5,1.6,\"Km (uM)\",2.5,0.125",
+                "\" \",1,2.8,\"Vmax (nmol/min)\",10,0.25", "\" \",2,4.5", "", ""});
+    CHECK_TEXT(format_report(a, options(ReportFormat::Medium, ReportLayout::Text), with_units(context(3, {}), "uM", "nmol/min")),
+               {"    #    [S] (uM)  v (nmol/min)             PARM         VALUE            SD", std::string(76, '-'),
+                "    3         0.5           1.6          Km (uM)           2.5         0.125",
+                "                1           2.8  Vmax (nmol/min)            10          0.25",
+                "                2           4.5", "", ""});
+}
+
+TEST_CASE(report_units_long, "report: LONG gives a Units line and units with the values and headings") {
+    const auto text =
+        format_report(make_mm(), options(ReportFormat::Long, ReportLayout::Csv), with_units(context(3, 7), "uM", "nmol/min"));
+    const auto lines = split(text);
+    CHECK(lines.size() > 7 && lines[5] == "    Michaelis-Menten/VARIABLE Vmax" && lines[6] == "    Units: [S] in uM; v in nmol/min" &&
+          lines[7] == "    Data: run #7 of the imported file");
+    CHECK(has_line(text, "    1 Standard deviation = 0.05 nmol/min"));
+    CHECK(has_line(text, "    Km: 2.5 +/- 0.125 uM  (5.00%)"));
+    CHECK(has_line(text, "    Vmax: 10 +/- 0.25 nmol/min  (2.50%)"));
+    CHECK(has_line(text, "    Pair #    [S] (uM)    v (nmol/min)  vhat          v-vhat        > 2 S.D. ?"));
+    CHECK(has_line(text, "    " + std::string(74, '-')));
+    CHECK(has_line(text, "     1        0.5         1.6           1.7           -1.00000e-01     *"));
+    CHECK(has_line(text, "     2        1           2.8           2.75          +5.00000e-02"));
+
+    // With only the X unit: no unit on Vmax or the SD. A UTF-8 unit is kept as it is.
+    const auto mu = format_report(make_mm(), options(ReportFormat::Long, ReportLayout::Csv),
+                                  with_units(context(3, {}), "\xC2\xB5M", ""));
+    CHECK(has_line(mu, "    Units: [S] in \xC2\xB5M"));
+    CHECK(has_line(mu, "    1 Standard deviation = 0.05"));
+    CHECK(has_line(mu, "    Km: 2.5 +/- 0.125 \xC2\xB5M  (5.00%)"));
+    CHECK(has_line(mu, "    Vmax: 10 +/- 0.25  (2.50%)"));
+}

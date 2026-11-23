@@ -33,12 +33,22 @@ struct ReportContext {
     std::optional<int> runNumber;       // file run / dataset, if the data came from a file
     bool firstInFile = true;            // SHORT/MEDIUM write column headings first
     std::string today;                  // e.g. "Friday, November 6, 2026"
+    // Units of the X and Y columns, e.g. "µM" and "nmol/min/mg". With both
+    // blank the report is exactly v3.51's.
+    std::string xUnit;
+    std::string yUnit;
 };
 
 // The number shown for a report: sequential counter, run number, or none.
 std::optional<int> report_number(const ReportOptions& opt, const ReportContext& ctx);
 
 std::string format_report(const Analysis& a, const ReportOptions& opt, const ReportContext& ctx);
+
+// The unit of a parameter, from the units of the X and Y columns, or "" if it
+// has none: the half-saturation constant takes X's unit; Vmax, v0, vmin and
+// the intercept take Y's; the slope is "Y per X" when both are given. The
+// Arrhenius parameters have none (log10(A), and Ea named with its unit).
+std::string parameter_unit(ModelId model, Role role, const std::string& xUnit, const std::string& yUnit);
 
 std::string today_string();
 

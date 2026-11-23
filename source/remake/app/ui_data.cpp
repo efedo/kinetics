@@ -3,13 +3,15 @@
 //
 // Top to bottom in the order of the work: choose the equation, enter the
 // data, fit. The parameter and minimisation settings, which most fits never
-// need, sit folded below the Fit button.
+// need, sit folded below the Fit button. While a run from an imported file
+// is shown, its points take the table's place, read-only.
 
 #include <imgui.h>
 #include <imgui_stdlib.h>
 
 #include <algorithm>
 #include <cfloat>
+#include <cmath>
 
 #include "app/app.hpp"
 #include "app/theme.hpp"
@@ -17,12 +19,96 @@
 #include "core/guess.hpp"
 
 namespace app {
+namespace {
+
+// The equation list, grouped by what the data are, with a line on when to
+// use each equation. The first of a group to try is marked.
+struct EquationInfo {
+    kin::ModelId id;
+    const char* name;
+    const char* useWhen;
+    bool startHere;
+};
+
+constexpr EquationInfo kEquations[] = {
+    {kin::ModelId::MichaelisMenten, "Michaelis-Menten", "v against [S], rising to a plateau. Suits most enzymes.", true},
+    {kin::ModelId::HillGt0, "Hill (h > 0)", "An S-shaped curve: cooperative binding, h estimated.", false},
+    {kin::ModelId::HillGe1, "Hill (h \xE2\x89\xA5 1)", "Only for an enzyme known to be positively cooperative.", false},
+    {kin::ModelId::ActivatorGt0, "Activator (h > 0)", "v against [A], with some activity without activator.", true},
+    {kin::ModelId::ActivatorGe1, "Activator (h \xE2\x89\xA5 1)", "As above, for an activator known to act cooperatively.",
+     false},
+    {kin::ModelId::ActivatorEq1, "Activator (h = 1)", "As above, when h does not differ from 1.", false},
+    {kin::ModelId::InhibitionLinear, "Linear inhibition", "v falling towards zero as [I] rises. Gives I50.", true},
+    {kin::ModelId::InhibitionI50, "Non-linear inhibition (I50)", "Curves the linear equation misses. Gives I50 and h.",
+     false},
+    {kin::ModelId::InhibitionK50, "Non-linear inhibition (K50)", "v falling to a floor (vmin). Gives the mid-point K50.",
+     false},
+    {kin::ModelId::Arrhenius, "Arrhenius", "log10(v) against temperature in \xC2\xB0" "C. Gives Ea.", false},
+    {kin::ModelId::Linear, "Linear regression", "A straight line, Y against X.", false},
+};
+
+const EquationInfo& equation_info(kin::ModelId id) {
+    for (const auto& e : kEquations)
+        if (e.id == id) return e;
+    return kEquations[0];
+}
+
+struct EquationGroup {
+    const char* title;
+    kin::Family a, b;  // the families in the group (b may repeat a)
+};
+
+constexpr EquationGroup kGroups[] = {
+    {"Substrate saturation", kin::Family::MichaelisMenten, kin::Family::Hill},
+    {"Activators", kin::Family::Activation, kin::Family::Activation},
+    {"Inhibitors", kin::Family::Inhibition, kin::Family::Inhibition},
+    {"Other", kin::Family::Arrhenius, kin::Family::Linear},
+};
+
+// The curve's shape, for a thumbnail beside its name: x from 0 to 4,
+// y from 0 to 1.
+double thumbnail_y(kin::ModelId id, double x) {
+    using M = kin::ModelId;
+    const double h2 = x * x / (1.0 + x * x);
+    switch (id) {
+    case M::MichaelisMenten: return x / (0.6 + x);
+    case M::HillGt0:
+    case M::HillGe1: return std::pow(x, 2.5) / (std::pow(1.2, 2.5) + std::pow(x, 2.5));
+    case M::ActivatorGt0:
+    case M::ActivatorGe1: return 0.3 + 0.65 * h2;
+    case M::ActivatorEq1: return 0.3 + 0.65 * x / (0.6 + x);
+    case M::InhibitionLinear: return 0.95 / (1.0 + 1.6 * x);
+    case M::InhibitionI50: return 0.95 * (1.0 - h2);
+    case M::InhibitionK50: return 0.95 - 0.7 * h2;
+    case M::Arrhenius: return 0.1 + 0.8 * std::pow(x / 4.0, 1.4);
+    case M::Linear: return 0.1 + 0.8 * x / 4.0;
+    }
+    return 0.0;
+}
+
+void draw_thumbnail(kin::ModelId id, ImVec2 p, ImVec2 size, ImU32 col, ImU32 axes) {
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddLine(ImVec2(p.x, p.y), ImVec2(p.x, p.y + size.y), axes);
+    dl->AddLine(ImVec2(p.x, p.y + size.y), ImVec2(p.x + size.x, p.y + size.y), axes);
+    ImVec2 pts[24];
+    for (int i = 0; i < 24; ++i) {
+        const double x = 4.0 * i / 23.0;
+        const double y = std::clamp(thumbnail_y(id, x), 0.0, 1.0);
+        pts[i] = ImVec2(p.x + static_cast<float>(x / 4.0) * size.x, p.y + size.y - static_cast<float>(y) * size.y);
+    }
+    dl->AddPolyline(pts, 24, col, ImDrawFlags_None, 1.5f);
+}
+
+}  // namespace
+
+const char* equation_name(kin::ModelId id) { return equation_info(id).name; }
 
 void App::draw_left_panel() {
-    ImGui::SeparatorText("Equation");
+    section_heading("Equation", true);
+    help_link(HelpId::Equation);
     draw_model_section();
-    ImGui::SeparatorText("Data");
-    draw_data_table();
+    if (showing_run()) draw_run_points();
+    else draw_data_table();
     // The table fills the height left over by what follows it, measured here
     // and used on the next frame.
     const float footerTop = ImGui::GetCursorPosY();
@@ -33,22 +119,69 @@ void App::draw_left_panel() {
 
 void App::draw_model_section() {
     const auto& def = kin::model_def(model_);
-    const std::string preview = std::string(1, def.letter) + ". " + std::string(def.menuName);
+    const float fs = ImGui::GetFontSize();
+    // In a short window the formula goes into the list's tooltip.
+    const bool shortWindow = ImGui::GetMainViewport()->WorkSize.y < fs * 41.0f;
     if (focusModel_) {
         ImGui::SetKeyboardFocusHere();
         focusModel_ = false;
     }
     ImGui::SetNextItemWidth(-FLT_MIN);
-    if (ImGui::BeginCombo("##model", preview.c_str(), ImGuiComboFlags_HeightLargest)) {
-        for (const auto& m : kin::all_models()) {
-            const std::string label = std::string(1, m.letter) + ". " + std::string(m.menuName);
-            const bool selected = m.id == model_;
-            if (ImGui::Selectable(label.c_str(), selected) && !selected) set_model(m.id);
-            if (selected) ImGui::SetItemDefaultFocus();
+    // The list is wider than the panel, to fit the "use when" lines.
+    ImGui::SetNextWindowSizeConstraints(ImVec2(fs * 30.0f, 0.0f),
+                                        ImVec2(FLT_MAX, ImGui::GetMainViewport()->WorkSize.y * 0.85f));
+    if (ImGui::BeginCombo("##model", equation_name(model_), ImGuiComboFlags_HeightLargest)) {
+        const ImGuiStyle& st = ImGui::GetStyle();
+        const float lineH = ImGui::GetTextLineHeight();
+        const ImVec2 thumb(fs * 2.2f, lineH * 1.5f);
+        for (const auto& g : kGroups) {
+            ImGui::SeparatorText(g.title);
+            for (const auto& m : kin::all_models()) {
+                if (m.family != g.a && m.family != g.b) continue;
+                const auto& info = equation_info(m.id);
+                const bool selected = m.id == model_;
+                ImGui::PushID(static_cast<int>(m.id));
+                // Two lines: the name (and "start here"), then when to use it.
+                const ImVec2 p = ImGui::GetCursorScreenPos();
+                const float h = lineH * 2.0f + st.ItemSpacing.y * 0.5f;
+                if (ImGui::Selectable("##eq", selected, 0, ImVec2(0.0f, h)) && !selected) set_model(m.id);
+                if (selected) ImGui::SetItemDefaultFocus();
+                ImGui::SetItemTooltip("%s", std::string(m.equation).c_str());
+                const float x = p.x + thumb.x + fs * 0.6f;
+                const float right = ImGui::GetItemRectMax().x - st.FramePadding.x;
+                draw_thumbnail(m.id, ImVec2(p.x + fs * 0.1f, p.y + (h - thumb.y) * 0.5f), thumb,
+                               ImGui::GetColorU32(palette().accent),
+                               ImGui::GetColorU32(ImVec4(palette().textDim.x, palette().textDim.y, palette().textDim.z, 0.5f)));
+                ImDrawList* dl = ImGui::GetWindowDrawList();
+                dl->AddText(ImVec2(x, p.y), ImGui::GetColorU32(ImGuiCol_Text), info.name);
+                if (info.startHere) {
+                    const char* tag = "start here";
+                    const float tw = ImGui::CalcTextSize(tag).x;
+                    dl->AddText(ImVec2(right - tw, p.y), ImGui::GetColorU32(palette().accent), tag);
+                }
+                const std::string use = fit_text(info.useWhen, right - x);
+                dl->AddText(ImVec2(x, p.y + lineH + st.ItemSpacing.y * 0.25f), ImGui::GetColorU32(palette().textDim),
+                            use.c_str());
+                // v3.51's menu letters still choose an equation while the list is open.
+                if (ImGui::IsKeyPressed(static_cast<ImGuiKey>(ImGuiKey_A + (m.letter - 'a')), false) &&
+                    !ImGui::GetIO().KeyCtrl && !ImGui::GetIO().KeyAlt) {
+                    if (!selected) set_model(m.id);
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::PopID();
+            }
         }
         ImGui::EndCombo();
     }
-    ImGui::TextWrapped("%s", std::string(def.equation).c_str());
+    item_tooltip(shortWindow ? std::string(def.equation) + "\n\nAlt+T. Letters a to k (v3.51's menu) choose an "
+                                                            "equation while the list is open."
+                             : std::string("Alt+T. Letters a to k (v3.51's menu) choose an equation while the list "
+                                           "is open."));
+    if (!shortWindow) {
+        ImGui::PushStyleColor(ImGuiCol_Text, palette().textDim);
+        ImGui::TextWrapped("%s", std::string(def.equation).c_str());
+        ImGui::PopStyleColor();
+    }
 }
 
 void App::draw_parameter_table() {
@@ -62,8 +195,7 @@ void App::draw_parameter_table() {
     const auto iv0 = kin::param_index(model_, kin::Role::V0);
     const bool v0Measured = v0_measured();
 
-    if (ImGui::BeginTable("##params", cols, ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_RowBg |
-                                                ImGuiTableFlags_SizingFixedFit)) {
+    if (ImGui::BeginTable("##params", cols, ImGuiTableFlags_SizingFixedFit)) {
         ImGui::TableSetupColumn("Parameter", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn("Fixed");
         ImGui::TableSetupColumn(manual ? "Fixed value / estimate" : "Fixed value", ImGuiTableColumnFlags_WidthFixed, numWidth);
@@ -139,17 +271,22 @@ void App::draw_parameter_table() {
 
 void App::draw_fit_button() {
     const auto& def = kin::model_def(model_);
-    const bool haveData = !kin::clean_data(table_points()).empty();
-    // While a run from the file analysis is shown, the table's state does not
-    // apply to the results.
-    const bool showingRun = batch_.selected >= 0 && analysisRun_.has_value();
+    const bool runs = showing_run();
+    // While the file's runs are shown and up to date there is nothing to fit.
+    const bool haveData = runs ? batchStale_ : !kin::clean_data(table_points()).empty();
 
     ImGui::Spacing();
     ImGui::BeginDisabled(!haveData);
-    if (primary_button(results_stale() ? "Fit again" : "Fit", ImVec2(-FLT_MIN, ImGui::GetFrameHeight() * 1.5f)))
-        request_fit();
+    const char* label = runs ? "Fit all runs again" : results_stale() ? "Fit again" : "Fit";
+    if (primary_button(label, ImVec2(-FLT_MIN, ImGui::GetFrameHeight() * 1.5f))) request_fit();
     ImGui::EndDisabled();
-    if (!haveData)
+    if (runs)
+        item_tooltip(batchStale_ ? "Fit every run of " + import_.path.filename().string() +
+                                       " with the current equation and options (F5)"
+                                 : std::string("The runs are fitted with the current settings. Change the equation "
+                                               "or the options to fit them again, or press Back to my table to fit "
+                                               "your own data."));
+    else if (!haveData)
         item_tooltip("Enter data first: type or paste " + std::string(def.xName) + " and " + std::string(def.yName) +
                      " values in the table above.");
     else
@@ -158,7 +295,7 @@ void App::draw_fit_button() {
 
     // Out-of-date results are flagged on the right; here, only a fit that
     // did not converge needs a word.
-    if (!analysis_ || showingRun || stale_) return;
+    if (!analysis_ || runs || stale_) return;
     if (!analysis_->linear && analysis_->fit.status != kin::FitStatus::Converged)
         warning_text("The last fit did not converge: see the Results tab.", analysis_->fit.message);
 }
@@ -169,8 +306,9 @@ void App::draw_fit_options_section() {
         ImGui::SetNextItemOpen(true);
         openFitOptions_ = false;
     }
-    const bool open = ImGui::CollapsingHeader("Fitting options");
+    const bool open = ImGui::CollapsingHeader("Fitting options", ImGuiTreeNodeFlags_AllowOverlap);
     if (ImGui::IsItemToggledOpen() && open) ImGui::SetScrollHereY(0.0f);  // bring the options into view
+    help_link(HelpId::FittingOptions);
     if (!open) {
         ImGui::PushStyleColor(ImGuiCol_Text, palette().textDim);
         ImGui::TextWrapped("%s", fit_settings_summary().c_str());
@@ -227,20 +365,55 @@ void App::draw_fit_settings() {
     if (linear) ImGui::SetItemTooltip("Linear regression is solved directly.");
 }
 
+namespace {
+
+// The data table's height: what the panel leaves above `footer`, but always
+// a few rows (the panel scrolls if the window is too short for both).
+float table_height(float footer) {
+    const float minHeight = ImGui::GetFrameHeightWithSpacing() * 6.0f;
+    return std::max(minHeight, ImGui::GetContentRegionAvail().y - footer);
+}
+
+// Narrow columns: numbers need about 10 font heights, not the panel's width.
+float table_width() {
+    return std::min(ImGui::GetContentRegionAvail().x, ImGui::GetFontSize() * 24.0f);
+}
+
+}  // namespace
+
 void App::draw_data_table() {
     const auto& def = kin::model_def(model_);
-    if (ImGui::SmallButton("Paste")) paste_table_from_clipboard();
-    ImGui::SetItemTooltip("Paste two columns copied from a spreadsheet");
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Open...")) show_open_dialog(FilePurpose::OpenTable, default_dir());
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Save...")) show_save_dialog(FilePurpose::SaveTable, tablePath_.empty() ? default_dir() + "data.csv" : tablePath_.string());
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Clear")) {
-        set_table({});
-        dataSource_ = "Entered by hand";
-        dataRun_.reset();
+    const bool arrhenius = def.family == kin::Family::Arrhenius;
+
+    // The heading, with the table's buttons beside it.
+    section_heading("Data");
+    struct Btn {
+        const char* label;
+        const char* tip;
+    };
+    const Btn buttons[] = {{"Paste", "Paste two columns copied from a spreadsheet"},
+                           {"Open...", "Open a data table (Ctrl+O)"},
+                           {"Save...", "Save the table as a comma-separated file (Ctrl+S)"},
+                           {"Clear", "Empty the table. The status bar then offers Undo."}};
+    // Beside the heading while they fit (leaving room for the help link),
+    // then on the next line.
+    const float helpW = ImGui::CalcTextSize("(?)").x + ImGui::GetStyle().ItemSpacing.x * 2.0f;
+    for (int b = 0; b < 4; ++b) {
+        same_line_if_fits(button_width(buttons[b].label) + helpW);
+        if (ImGui::SmallButton(buttons[b].label)) {
+            switch (b) {
+            case 0: paste_table_from_clipboard(); break;
+            case 1: show_open_dialog(FilePurpose::OpenTable, default_dir()); break;
+            case 2:
+                show_save_dialog(FilePurpose::SaveTable,
+                                 tablePath_.empty() ? default_dir() + "data.csv" : tablePath_.string());
+                break;
+            default: clear_table(); break;
+            }
+        }
+        ImGui::SetItemTooltip("%s", buttons[b].tip);
     }
+    help_link(HelpId::Data);
 
     if (rows_.empty() || !rows_.back().x.empty() || !rows_.back().y.empty()) rows_.push_back({});
 
@@ -256,17 +429,33 @@ void App::draw_data_table() {
     int insertAt = -1, deleteAt = -1;
     const ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInner | ImGuiTableFlags_ScrollY |
                                   ImGuiTableFlags_BordersOuter;
-    // Leave room for the Fit button and the options below, but always show a
-    // few rows (the panel scrolls if the window is too short for both).
-    const float minHeight = ImGui::GetFrameHeightWithSpacing() * 6.0f;
-    const float height = std::max(minHeight, ImGui::GetContentRegionAvail().y - leftFooterHeight_);
     const bool empty = rows_.size() == 1;
-    if (ImGui::BeginTable("##data", 3, flags, ImVec2(0, height))) {
-        ImGui::TableSetupScrollFreeze(0, 1);
+    if (ImGui::BeginTable("##data", 3, flags, ImVec2(table_width(), table_height(leftFooterHeight_)))) {
+        // The heading and the units stay in view while the rows scroll.
+        ImGui::TableSetupScrollFreeze(0, arrhenius ? 1 : 2);
         ImGui::TableSetupColumn("#", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 2.5f);
         ImGui::TableSetupColumn(std::string(def.xName).c_str(), ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn(std::string(def.yName).c_str(), ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableHeadersRow();
+        if (!arrhenius) {
+            // Optional units, used in the results, the graph and reports.
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            for (int c = 0; c < 2; ++c) {
+                ImGui::TableNextColumn();
+                std::string& unit = c == 0 ? xUnit_ : yUnit_;
+                ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+                ImGui::PushStyleColor(ImGuiCol_Text, palette().textDim);
+                ImGui::SetNextItemWidth(-FLT_MIN);
+                ImGui::InputTextWithHint(c == 0 ? "##xunit" : "##yunit", "unit (optional)", &unit);
+                if (ImGui::IsItemDeactivatedAfterEdit()) save_settings();
+                ImGui::PopStyleColor(2);
+                item_tooltip(c == 0 ? "The unit of " + std::string(def.xName) + ", e.g. \xC2\xB5M. It is shown with "
+                                      "the half-saturation constant, on the graph and in reports."
+                                    : "The unit of " + std::string(def.yName) + ", e.g. nmol/min/mg. It is shown "
+                                      "with Vmax and v0, on the graph and in reports.");
+            }
+        }
         if (focusTable_) ImGui::SetScrollY(0.0f);
 
         ImGuiListClipper clipper;
@@ -312,7 +501,7 @@ void App::draw_data_table() {
                     const std::string hint = empty ? "type " + std::string(c == 0 ? def.xName : def.yName) : std::string();
                     if (ImGui::InputTextWithHint(c == 0 ? "##x" : "##y", hint.c_str(), &cell,
                                                  ImGuiInputTextFlags_CharsScientific)) {
-                        mark_stale();
+                        mark_table_changed();
                         if (dataSource_ != "Entered by hand" && dataSource_.find("(edited)") == std::string::npos)
                             dataSource_ += " (edited)";
                     }
@@ -326,12 +515,55 @@ void App::draw_data_table() {
     }
     if (insertAt >= 0) {
         rows_.insert(rows_.begin() + insertAt, DataRow{});
-        mark_stale();
+        mark_table_changed();
     }
     if (deleteAt >= 0) {
         rows_.erase(rows_.begin() + deleteAt);
-        mark_stale();
+        mark_table_changed();
     }
+}
+
+void App::draw_run_points() {
+    const auto* item = shown_item();
+    if (!item) return;
+    const auto& def = kin::model_def(item->analysis ? item->analysis->model() : model_);
+    const bool sheet = import_.type == ImportType::Spreadsheet;
+    section_heading("Data");
+    ImGui::SameLine();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextDisabled("%s #%d, read-only", sheet ? "run" : "dataset", item->runNumber);
+    help_link(HelpId::FileData);
+
+    // The points the run was fitted to, or for a run that failed, its points
+    // as the file gives them.
+    std::vector<kin::Point> pts;
+    if (item->analysis) pts = item->analysis->data;
+    else if (sheet && import_.sheet)
+        if (const auto* run = import_.sheet->find_run(item->runNumber)) pts = import_.sheet->points(*run, import_.negativeIsMissing);
+
+    const ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInner | ImGuiTableFlags_ScrollY |
+                                  ImGuiTableFlags_BordersOuter;
+    const float noteH = ImGui::GetTextLineHeightWithSpacing() * 2.0f;
+    if (ImGui::BeginTable("##runpoints", 3, flags, ImVec2(table_width(), table_height(leftFooterHeight_ + noteH)))) {
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableSetupColumn("#", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 2.5f);
+        ImGui::TableSetupColumn(x_heading(def.id).c_str(), ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn(y_heading(def.id).c_str(), ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableHeadersRow();
+        for (size_t i = 0; i < pts.size(); ++i) {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::TextDisabled("%zu", i + 1);
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(number_text(pts[i].x).c_str());
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(number_text(pts[i].y).c_str());
+        }
+        ImGui::EndTable();
+    }
+    ImGui::PushStyleColor(ImGuiCol_Text, palette().textDim);
+    ImGui::TextWrapped("To change these points, press Edit this run in the table, above.");
+    ImGui::PopStyleColor();
 }
 
 }  // namespace app

@@ -25,14 +25,15 @@ struct Palette {
     ImVec4 warning;  // out of date, poor precision, large residuals
     ImVec4 bad;      // errors
     ImVec4 badFill;  // background of a cell that is not a number
+    ImVec4 good;     // a fit that needs no further attention
 };
 
 // Sets the Dear ImGui and ImPlot sizes. `scale` is the display scale (1.0 at
 // 96 dpi). Call once, before set_theme.
 void init_style(float scale);
 
-// Sets the colours. Dark is the default; System follows the operating
-// system's (or browser's) light or dark setting.
+// Sets the colours. System, the default, follows the operating system's (or
+// browser's) light or dark setting.
 void set_theme(ThemeChoice choice);
 ThemeChoice theme_choice();
 
@@ -48,5 +49,17 @@ std::optional<ThemeChoice> theme_from_name(std::string_view name);
 
 // A button filled with the accent colour, for the main action on a panel.
 bool primary_button(const char* label, const ImVec2& size = ImVec2(0.0f, 0.0f));
+
+// The fonts loaded at start-up (main.cpp). Any may be null; the default
+// font is then used.
+struct Fonts {
+    ImFont* ui = nullptr;
+    ImFont* mono = nullptr;     // the report preview, file formats in help
+    ImFont* heading = nullptr;  // section titles: semibold where the system has one
+};
+Fonts& fonts();
+
+// Background colours of the menu bar and of the status bar's messages.
+ImVec4 bar_colour();
 
 }  // namespace app

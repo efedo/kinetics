@@ -41,12 +41,19 @@ public:
     void set_result(kin::Analysis analysis, std::optional<int> run) override {
         kin::AnalysisOutcome outcome;
         outcome.analysis = std::move(analysis);
+        a_.leave_run_view();
         a_.apply_analysis(std::move(outcome), run);
-        a_.batch_.selected = -1;
     }
 
-    const kin::Analysis* result() const override { return a_.analysis_ ? &*a_.analysis_ : nullptr; }
-    std::optional<int> result_run() const override { return a_.analysisRun_; }
+    // The classic interface works on the table: while the modern one shows a
+    // file run, the table's own fit is the result.
+    const kin::Analysis* result() const override {
+        if (a_.tableResult_) return a_.tableResult_->analysis ? &*a_.tableResult_->analysis : nullptr;
+        return a_.analysis_ ? &*a_.analysis_ : nullptr;
+    }
+    std::optional<int> result_run() const override {
+        return a_.tableResult_ ? a_.tableResult_->run : a_.analysisRun_;
+    }
     bool result_stale() const override { return a_.stale_; }
 
     ImportState& import_state() override { return a_.import_; }
@@ -54,11 +61,13 @@ public:
     ReportState& report_state() override { return a_.report_; }
 
     std::optional<std::string> import_spreadsheet(const std::filesystem::path& path) override {
+        a_.notice_.reset();
         a_.import_spreadsheet(path);
         return take_error();
     }
 
     std::optional<std::string> import_mpa(const std::filesystem::path& path) override {
+        a_.notice_.reset();
         a_.import_mpa(path);
         return take_error();
     }
@@ -85,12 +94,13 @@ public:
     }
 
 private:
-    // App reports errors through a modal; the classic interface shows its
-    // own, so take the message and close the modal before it is drawn.
+    // App reports errors in its message bar; the classic interface shows its
+    // own, so take the message before the modern interface shows it.
     std::optional<std::string> take_error() {
-        if (!a_.openError_) return std::nullopt;
-        a_.openError_ = false;
-        return std::exchange(a_.errorText_, std::string());
+        if (!a_.notice_ || !a_.notice_->isError) return std::nullopt;
+        std::string text = std::move(a_.notice_->text);
+        a_.notice_.reset();
+        return text;
     }
 
     static std::filesystem::path path_from_utf8_string(const std::string& s) {

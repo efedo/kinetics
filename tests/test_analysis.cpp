@@ -465,6 +465,41 @@ TEST_CASE(analysis_too_few_points_notes, "analysis: notes for too few points and
                 {"Only 3 points for 2 free parameters: a reliable fit needs more points than parameters + 1."});
 }
 
+TEST_CASE(analysis_parameters_at_bounds, "analysis: free parameters that end at a bound are reported") {
+    // The example data fit well inside the default bounds.
+    CHECK(test::must_analyse(test::request(ModelId::MichaelisMenten, kMmExample)).parameters_at_bounds().empty());
+
+    // Data from h = 0.5: the Hill equation with h >= 1 holds h at its lower bound of 1.
+    std::vector<Point> shallow;
+    for (double x : {0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0})
+        shallow.push_back({x, 10.0 * std::sqrt(x) / (std::sqrt(2.0) + std::sqrt(x))});
+    const auto ge1 = test::must_analyse(test::request(ModelId::HillGe1, shallow));
+    const auto hits = ge1.parameters_at_bounds();
+    CHECK(hits.size() == 1);
+    if (hits.size() == 1) {
+        CHECK(hits[0].index == 1 && !hits[0].upper);
+        CHECK(hits[0].bound == 1.0 && ge1.fit.p[1] == 1.0);
+    }
+
+    // A parameter fixed at its bound is not reported, and neither is a
+    // custom bound the fit stays clear of.
+    auto fixedReq = test::request(ModelId::HillGe1, shallow);
+    fixedReq.params[1].fixed = true;
+    fixedReq.params[1].value = 1.0;
+    CHECK(test::must_analyse(fixedReq).parameters_at_bounds().empty());
+
+    // An upper bound below the best Km pins it there.
+    auto capped = test::request(ModelId::MichaelisMenten, kMmExample);
+    capped.params[0].max = 1.0;
+    const auto c = test::must_analyse(capped).parameters_at_bounds();
+    CHECK(c.size() == 1 && c[0].index == 0 && c[0].upper && c[0].bound == 1.0);
+
+    // Linear regression has no bounds to hit.
+    CHECK(test::must_analyse(test::request(ModelId::Linear, {{1, 2}, {2, 4.1}, {3, 5.9}, {4, 8.2}}))
+              .parameters_at_bounds()
+              .empty());
+}
+
 TEST_CASE(analysis_iteration_limit_note, "analysis: hitting the iteration limit adds the solver message") {
     for (Method method : {Method::Marquardt, Method::GaussNewton}) {
         auto req = manual(ModelId::MichaelisMenten, kMmExample, {40, 1}, method);

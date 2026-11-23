@@ -64,6 +64,7 @@ if(KINETICS_BUILD_APP)
         source/remake/app/ui_plot.cpp
         source/remake/app/ui_batch.cpp
         source/remake/app/ui_dialogs.cpp
+        source/remake/app/ui_frame.cpp
         source/remake/app/help_text.cpp
         source/remake/app/platform.cpp
         source/remake/app/theme.cpp

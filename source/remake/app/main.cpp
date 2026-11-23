@@ -12,7 +12,7 @@
 //                             one per run with --analyse-all, else the --fit result
 //   --tab <name>              results | graph | residuals | standard | runs | report
 //   --plot <1..10>            plot type (v3.51 numbering)
-//   --show <name>             help | about | report-options | fit-options
+//   --show <name>             help | about | report-options | fit-options | graph | residuals
 //   --theme <name>            system (default) | dark | light
 //   --text-size <percent>     text size, 80 to 150 (default 100)
 //   --classic                 start in the classic (v3.51) interface
@@ -123,6 +123,15 @@ app::Fonts load_fonts() {
                                        "/usr/share/fonts/TTF/DejaVuSansMono.ttf"});
     if (ui) f.ui = io.Fonts->AddFontFromFileTTF(ui, 17.0f);
     if (!f.ui) f.ui = io.Fonts->AddFontDefault();
+    // Section titles: a semibold face where the system has one. The web
+    // build's Roboto Medium is already a little heavy, so it serves for both.
+    const char* heading = first_existing({
+#ifdef _WIN32
+        "C:\\Windows\\Fonts\\seguisb.ttf",
+#endif
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf"});
+    if (heading && ui) f.heading = io.Fonts->AddFontFromFileTTF(heading, 17.0f);
+    if (!f.heading) f.heading = f.ui;
     if (mono && (f.mono = io.Fonts->AddFontFromFileTTF(mono, 15.0f)) && ui) {
         // Fill glyphs the monospaced font lacks (e.g. >= in equation names).
         ImFontConfig cfg;
@@ -132,10 +141,9 @@ app::Fonts load_fonts() {
     return f;
 }
 
+// "graph" and "residuals" are parts of the Results tab (App::show_window).
 std::optional<app::Tab> tab_from_name(const std::string& n) {
     if (n == "results") return app::Tab::Results;
-    if (n == "graph") return app::Tab::Graph;
-    if (n == "residuals") return app::Tab::Residuals;
     if (n == "standard") return app::Tab::StandardCurve;
     if (n == "runs") return app::Tab::FileRuns;
     if (n == "report") return app::Tab::Report;
@@ -158,6 +166,7 @@ struct Context {
 };
 
 void enter_classic(Context& c) {
+    c.app.prepare_for_classic();
     if (!c.classicSession) c.classicSession = app::make_classic_session(c.app);
     c.classicHost.start(*c.classicSession, c.window);
     c.classicActive = true;
@@ -379,7 +388,7 @@ int main(int argc, char** argv) {
     ImGui_ImplSDLRenderer3_Init(c.renderer);
     app::platform_init(c.window);
 
-    c.app.fonts = load_fonts();
+    app::fonts() = load_fonts();
     c.app.init(c.screenshot ? std::filesystem::path() : prefDir, exeDir);
 
     const Options& o = c.opt;
@@ -394,6 +403,7 @@ int main(int argc, char** argv) {
     if (!o.report.empty() && o.fit) c.app.write_current_report();
     if (o.plot >= 1 && o.plot <= 10) c.app.set_plot_type(static_cast<kin::PlotType>(o.plot));
     if (auto t = tab_from_name(o.tab)) c.app.select_tab(*t);
+    else if (o.tab == "graph" || o.tab == "residuals") c.app.show_window(o.tab);
     if (!o.show.empty()) c.app.show_window(o.show);
     if (auto t = app::theme_from_name(o.theme)) app::set_theme(*t);
     if (o.textSize > 0) c.app.set_text_scale(o.textSize);

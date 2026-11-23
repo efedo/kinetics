@@ -220,6 +220,21 @@ std::vector<ParamRow> Analysis::parameter_rows() const {
     return rows;
 }
 
+std::vector<BoundHit> Analysis::parameters_at_bounds() const {
+    std::vector<BoundHit> out;
+    if (linear) return out;  // solved directly, without bounds
+    const auto& s = request.params;
+    for (size_t j = 0; j < fit.p.size() && j < s.size() && j < fit.fixed.size(); ++j) {
+        if (fit.fixed[j]) continue;
+        const double v = fit.p[j];
+        // The solver clamps to the bound, so a pinned parameter equals it.
+        auto at = [v](double b) { return std::fabs(v - b) <= 1e-9 * std::max(std::fabs(b), std::fabs(v)); };
+        if (at(s[j].min)) out.push_back({static_cast<int>(j), false, s[j].min});
+        else if (at(s[j].max)) out.push_back({static_cast<int>(j), true, s[j].max});
+    }
+    return out;
+}
+
 std::string Analysis::method_title() const {
     if (linear) return "LINEAR REGRESSION";
     return fit.method == Method::GaussNewton ? "GAUSS-NEWTON minimization" : "MARQUARDT-LEVENBERG minimization";
