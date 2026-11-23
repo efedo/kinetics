@@ -1,5 +1,6 @@
 #include "core/import.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
@@ -88,6 +89,36 @@ std::optional<double> parse_number(std::string_view s) {
     return v;
 }
 
+// The cells of a line: split on , ; or tab, or if none is present, on runs
+// of spaces.
+std::vector<std::string_view> split_cells(std::string_view line) {
+    std::vector<std::string_view> cells;
+    const bool delimited = line.find_first_of(",;\t") != std::string_view::npos;
+    size_t start = 0;
+    for (size_t i = 0; i <= line.size(); ++i) {
+        const bool sep = i == line.size() || (delimited ? (line[i] == ',' || line[i] == ';' || line[i] == '\t')
+                                                        : line[i] == ' ');
+        if (!sep) continue;
+        const auto cell = line.substr(start, i - start);
+        if (delimited || !cell.empty()) cells.push_back(cell);
+        start = i + 1;
+    }
+    return cells;
+}
+
+bool blank_cell(std::string_view s) {
+    for (char ch : s)
+        if (!std::isspace(static_cast<unsigned char>(ch)) && ch != '"') return false;
+    return true;
+}
+
+// A cell's text without surrounding spaces and quotes.
+std::string cell_text(std::string_view s) {
+    while (!s.empty() && (std::isspace(static_cast<unsigned char>(s.front())) || s.front() == '"')) s.remove_prefix(1);
+    while (!s.empty() && (std::isspace(static_cast<unsigned char>(s.back())) || s.back() == '"')) s.remove_suffix(1);
+    return std::string(s);
+}
+
 }  // namespace
 
 const SpreadsheetRun* SpreadsheetFile::find_run(int number) const {
@@ -100,7 +131,7 @@ std::vector<Point> SpreadsheetFile::points(const SpreadsheetRun& run, bool negat
     std::vector<Point> pts;
     for (size_t i = 0; i < x.size() && i < run.y.size(); ++i) {
         const double v = run.y[i];
-        const bool missing = negativeIsMissing ? v < 0.0 : v == -1.0;
+        const bool missing = !std::isfinite(v) || (negativeIsMissing ? v < 0.0 : v == -1.0);
         if (!missing) pts.push_back({x[i], v});
     }
     return pts;
@@ -158,6 +189,79 @@ SpreadsheetParse parse_spreadsheet(std::string_view text) {
     return out;
 }
 
+SpreadsheetParse parse_run_table(std::string_view text, bool runsInRows) {
+    SpreadsheetParse out;
+    // The table's cells, without blank lines.
+    std::vector<std::vector<std::string_view>> grid;
+    for (auto line : split_lines(text)) {
+        auto cells = split_cells(line);
+        bool any = false;
+        for (auto c : cells) any = any || !blank_cell(c);
+        if (any) grid.push_back(std::move(cells));
+    }
+    // A table with a run in each row is read as its transpose.
+    if (runsInRows) {
+        size_t w = 0;
+        for (const auto& r : grid) w = std::max(w, r.size());
+        std::vector<std::vector<std::string_view>> t(w);
+        for (size_t c = 0; c < w; ++c)
+            for (const auto& r : grid) t[c].push_back(c < r.size() ? r[c] : std::string_view());
+        grid = std::move(t);
+    }
+
+    // Rows that start with a number hold the data; the last row before the
+    // first of them, if any, names the runs.
+    const std::vector<std::string_view>* heading = nullptr;
+    std::vector<const std::vector<std::string_view>*> rows;
+    for (const auto& r : grid) {
+        if (!r.empty() && parse_number(r[0])) rows.push_back(&r);
+        else if (rows.empty()) heading = &r;
+    }
+    const std::string layout = runsInRows ? "the first row should hold the concentrations, and each further row a run"
+                                          : "the first column should hold the concentrations, and each further column a "
+                                            "run";
+    if (rows.empty()) {
+        out.error = "No concentrations found: " + layout + ".";
+        return out;
+    }
+    size_t width = 0;
+    for (const auto* r : rows) width = std::max(width, r->size());
+
+    SpreadsheetFile file;
+    for (const auto* r : rows) file.x.push_back(*parse_number((*r)[0]));
+    for (size_t c = 1; c < width; ++c) {
+        SpreadsheetRun run;
+        bool any = false;
+        for (const auto* r : rows) {
+            const auto v = c < r->size() ? parse_number((*r)[c]) : std::nullopt;
+            run.y.push_back(v.value_or(kNaN));
+            any = any || v.has_value();
+        }
+        if (!any) continue;  // an empty column, or one of text
+        run.number = static_cast<int>(file.runs.size()) + 1;
+        if (heading && c < heading->size()) run.name = cell_text((*heading)[c]);
+        file.runs.push_back(std::move(run));
+    }
+    if (file.runs.empty()) {
+        out.error = "No runs found: " + layout + ".";
+        return out;
+    }
+    out.file = std::move(file);
+    return out;
+}
+
+bool is_v351_spreadsheet(std::string_view text) {
+    for (auto line : split_lines(text)) {
+        size_t i = 0;
+        while (i < line.size() && (line[i] == ' ' || line[i] == '\t' || line[i] == '"')) ++i;
+        if (i >= line.size() || std::tolower(static_cast<unsigned char>(line[i])) != 's') continue;
+        ++i;
+        while (i < line.size() && (line[i] == ' ' || line[i] == '\t')) ++i;
+        if (i < line.size() && line[i] == '=') return true;
+    }
+    return false;
+}
+
 MpaParse parse_mpa_dataset(std::string_view text, int dataset, int count) {
     MpaParse out;
     if (dataset < 1 || count < 1) {
@@ -204,28 +308,12 @@ int mpa_dataset_count(std::string_view text, int count) {
 std::vector<Point> parse_xy_table(std::string_view text) {
     std::vector<Point> rows;
     for (auto line : split_lines(text)) {
-        // Split on , ; or tab; if none present, on runs of spaces.
-        std::vector<std::string_view> cells;
-        const bool delimited = line.find_first_of(",;\t") != std::string_view::npos;
-        size_t start = 0;
-        for (size_t i = 0; i <= line.size(); ++i) {
-            const bool sep = i == line.size() || (delimited ? (line[i] == ',' || line[i] == ';' || line[i] == '\t')
-                                                            : line[i] == ' ');
-            if (!sep) continue;
-            auto cell = line.substr(start, i - start);
-            if (delimited || !cell.empty()) cells.push_back(cell);
-            start = i + 1;
-        }
+        const auto cells = split_cells(line);
         if (cells.size() < 2) continue;
-        auto blank = [](std::string_view s) {
-            for (char ch : s)
-                if (!std::isspace(static_cast<unsigned char>(ch)) && ch != '"') return false;
-            return true;
-        };
         const auto x = parse_number(cells[0]);
         const auto y = parse_number(cells[1]);
-        const bool xOk = x || blank(cells[0]);
-        const bool yOk = y || blank(cells[1]);
+        const bool xOk = x || blank_cell(cells[0]);
+        const bool yOk = y || blank_cell(cells[1]);
         if (!xOk || !yOk || (!x && !y)) continue;  // heading or empty row
         rows.push_back({x.value_or(kNaN), y.value_or(kNaN)});
     }

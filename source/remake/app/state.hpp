@@ -26,6 +26,12 @@ struct ImportState {
     ImportType type = ImportType::None;
     std::filesystem::path path;
     std::optional<kin::SpreadsheetFile> sheet;
+    // A table of runs (a spreadsheet saved as CSV or text, rather than in
+    // v3.51's print-to-file format): its text, read again when the user says
+    // whether the runs are in its columns or its rows.
+    bool table = false;
+    bool runsInRows = false;
+    std::string tableText;
     std::string mpaText;
     int mpaCount = 8;          // velocities per MPA dataset
     int selectedRun = 1;       // spreadsheet run number or MPA dataset number

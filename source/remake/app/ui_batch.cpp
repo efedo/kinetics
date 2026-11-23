@@ -1,5 +1,6 @@
-// File runs tab: imported spreadsheet / MPA files, the automatic analysis of
-// every run and single-run fits (v3.51 Calculate > file data, preview).
+// File runs tab: an imported table or spreadsheet file of runs (or an MPA
+// file read by the classic interface), the automatic analysis of every run
+// and single-run fits (v3.51 Calculate > file data, preview).
 //
 // A file of runs is usually analysed as a whole, so that comes first; the
 // runs table below it selects the run that both panels then show.
@@ -24,8 +25,8 @@ void App::draw_file_runs_tab() {
     ImGui::AlignTextToFramePadding();
     if (sheet) {
         const auto& f = *import_.sheet;
-        ImGui::Text("%s: %zu runs, %zu concentrations", import_.path.filename().string().c_str(), f.runs.size(),
-                    f.x.size());
+        ImGui::Text("%s: %zu run%s, %zu concentration%s", import_.path.filename().string().c_str(), f.runs.size(),
+                    f.runs.size() == 1 ? "" : "s", f.x.size(), f.x.size() == 1 ? "" : "s");
         std::string xs;
         for (size_t i = 0; i < f.x.size() && i < 12; ++i) xs += (i ? ", " : "") + kin::fmt_g(f.x[i]);
         if (f.x.size() > 12) xs += ", ...";
@@ -39,6 +40,16 @@ void App::draw_file_runs_tab() {
                      "every dataset. To use another file, choose File > Import.");
     }
     help_link(HelpId::FileData);
+    // A table of runs can hold them either way round.
+    if (sheet && import_.table) {
+        field_label("Runs are in the table's");
+        int rows = import_.runsInRows ? 1 : 0;
+        if (ImGui::RadioButton("columns", &rows, 0)) set_runs_in_rows(false);
+        ImGui::SetItemTooltip("The first column holds the concentrations, and each further column a run");
+        ImGui::SameLine();
+        if (ImGui::RadioButton("rows", &rows, 1)) set_runs_in_rows(true);
+        ImGui::SetItemTooltip("The first row holds the concentrations, and each further row a run");
+    }
 
     // All runs.
     if (primary_button("Analyse all runs")) analyse_all_runs();
@@ -72,11 +83,14 @@ void App::draw_file_runs_tab() {
             const auto& f = *import_.sheet;
             field_label("Run");
             ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.0f);
-            const std::string preview = "Run #" + std::to_string(import_.selectedRun);
+            const std::string selName = run_name(import_.selectedRun);
+            const std::string preview = "Run #" + std::to_string(import_.selectedRun) + (selName.empty() ? "" : " " + selName);
             if (ImGui::BeginCombo("##run", preview.c_str())) {
                 for (const auto& r : f.runs) {
                     const auto n = f.points(r, import_.negativeIsMissing).size();
-                    const std::string label = "Run #" + std::to_string(r.number) + "  (" + std::to_string(n) + " points)";
+                    const std::string name = run_name(r.number);
+                    const std::string label = "Run #" + std::to_string(r.number) + (name.empty() ? "" : " " + name) +
+                                              "  (" + std::to_string(n) + " points)";
                     if (ImGui::Selectable(label.c_str(), r.number == import_.selectedRun)) import_.selectedRun = r.number;
                 }
                 ImGui::EndCombo();
@@ -120,7 +134,9 @@ void App::draw_file_runs_tab() {
             const auto& it = batch_.items[static_cast<size_t>(i)];
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
-            const std::string label = "#" + std::to_string(it.runNumber) + "##run" + std::to_string(i);
+            const std::string name = run_name(it.runNumber);
+            const std::string label =
+                "#" + std::to_string(it.runNumber) + (name.empty() ? "" : " " + name) + "##run" + std::to_string(i);
             const bool shown = showing_run() && batch_.selected == i;
             if (ImGui::Selectable(label.c_str(), shown, ImGuiSelectableFlags_SpanAllColumns)) show_batch_item(i);
             ImGui::TableNextColumn();

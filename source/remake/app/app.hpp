@@ -5,7 +5,7 @@
 //
 // The window, top to bottom: the menus, a strip with the five steps of the
 // work (Data, Equation, Fit, Results, Report), a banner while a run from an
-// imported file is shown, the left panel (Data, Equation and Fit sections)
+// imported file is shown, the left panel (Data, Equation and Fitting options sections)
 // beside the right one (results and graph, standard curve, file runs,
 // report), and a status bar naming the data, or with the latest message.
 
@@ -66,7 +66,7 @@ public:
     // help | about | report-options | fit-options | graph | residuals
     void show_window(const std::string& name);
     void select_tab(Tab t) { requestedTab_ = t; }
-    // The Prediction box's inputs: a Y to read X for, and an X to read Y for.
+    // The Calculate box's inputs: a Y to read X for, and an X to read Y for.
     void set_predictions(const std::string& forY, const std::string& forX) {
         predictFromY_ = forY;
         predictFromX_ = forX;
@@ -116,6 +116,11 @@ private:
     void fit_selected_run();
     void analyse_all_runs();
     void show_batch_item(int index);
+    // A table of runs: read its runs from the rows rather than the columns.
+    void set_runs_in_rows(bool rows);
+    // The heading that names a run of the imported file, unless it only
+    // repeats the number; empty otherwise.
+    std::string run_name(int number) const;
 
     // While a run from the file analysis is shown, both panels show that run
     // and the table's own fit waits in tableResult_.
@@ -162,9 +167,9 @@ private:
             openReportOptions_ = true;
         }
     }
-    enum class Example { MichaelisMenten, Arrhenius, SpreadsheetRuns, MpaPlate };
+    enum class Example { MichaelisMenten, Arrhenius, SpreadsheetRuns, RunsInColumns, MpaPlate };
     void open_example(Example e);
-    // Whether all the fit settings (Fit section) are at their defaults.
+    // Whether all the fit settings (Fitting options) are at their defaults.
     bool fit_settings_are_default() const;
     // v0 is fixed and the table has a point at zero concentration: that velocity is used.
     bool v0_measured() const;
@@ -232,7 +237,7 @@ private:
     void point_tooltip(const kin::Analysis& a, int i);
     // Predictions from the fitted curve (formerly the Standard curve tab).
     void draw_prediction_box(const kin::Analysis& a, float width);
-    // The Prediction box's answers as points on the curve, in the data's
+    // The Calculate box's answers as points on the curve, in the data's
     // units: [0] the X read off for the entered Y, [1] the Y for the entered X.
     std::array<std::optional<std::pair<double, double>>, 2> prediction_points(const kin::Analysis& a) const;
     void draw_file_runs_tab();
@@ -298,7 +303,7 @@ private:
     ImportState import_;
     BatchState batch_;
     ReportState report_;
-    // The Prediction box's inputs, as typed: a Y to read X off the curve
+    // The Calculate box's inputs, as typed: a Y to read X off the curve
     // for, and an X to read Y for. Blank for none.
     std::string predictFromY_, predictFromX_;
     // The data point under the mouse on the graph (an index into the
@@ -336,8 +341,8 @@ private:
     PendingReport pendingReport_ = PendingReport::None;
     bool focusModel_ = false;
     bool focusTable_ = false;
-    bool focusStdX_ = false;  // Prediction box: X for a given Y
-    bool focusStdY_ = false;  // Prediction box: Y for a given X
+    bool focusStdX_ = false;  // Calculate box: X for a given Y
+    bool focusStdY_ = false;  // Calculate box: Y for a given X
     bool quit_ = false;
     bool classicRequested_ = false;
 };

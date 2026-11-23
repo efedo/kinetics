@@ -67,7 +67,7 @@ constexpr HelpTopic kTopics[] = {
      "The Arrhenius equation needs base-10 logarithms of the velocities and temperatures in degrees "
      "Celsius; follow the column headings of the data table. Ea is reported in kcal/mol and kJ/mol.\n\n"
      "## Fixed parameters\n\n"
-     "Parameters can be held fixed with the Fixed check box in the Fit section. For example, if you "
+     "Parameters can be held fixed with the Fixed check box under Fitting options. For example, if you "
      "have several measurements at saturating substrate and so know Vmax, you can fix Vmax at that "
      "value. This is a convenience only: your data should span a wide enough range for the program to "
      "find all the parameters, and a fixed value must be accurate. When v0 is fixed and the data "
@@ -94,9 +94,10 @@ constexpr HelpTopic kTopics[] = {
      "itself."},
 
     {"Using file data",
-     "You can analyse data saved as a text file in either of two formats. Choose File > Import "
-     "spreadsheet file of runs or File > Import plate-reader file (MPA). The File runs tab then opens. "
-     "Close the tab, or choose File > Close imported file, when you have finished with the file.\n\n"
+     "You can analyse many runs saved from a spreadsheet as a text file: a table with a run in each "
+     "column (or each row), or the print-to-file format of version 3.51. Choose File > Import "
+     "spreadsheet file of runs; the File runs tab then opens. Close the tab, or choose File > Close "
+     "imported file, when you have finished with the file.\n\n"
      "## Analysing the runs\n\n"
      "Analyse all runs fits every run from the chosen run number to the end of the file, with the "
      "current equation and fitting options. The results are listed in a table. Click a run to show it: "
@@ -108,9 +109,20 @@ constexpr HelpTopic kTopics[] = {
      "on its own; Back to my table shows your own table and its results again.\n\n"
      "Tick 'Write a report for each run' to append a report for every run to the report file. 'One "
      "run at a time' loads a single run into the data table, or loads and fits it.\n\n"
-     "## Spreadsheet files\n\n"
-     "A spreadsheet file can be produced by any spreadsheet by saving the data as text (version 3.51 "
-     "suggested Lotus 1-2-3 or Quattro Pro, printing to a file). The format is:\n\n"
+     "## Tables of runs\n\n"
+     "Save the sheet as CSV (comma-separated) or tab-separated text, with the concentrations in the "
+     "first column and the velocities of one run in each further column:\n\n"
+     "    [S],   Run 1,  Run 2,  Run 3\n"
+     "    0.5,   0.474,  0.727,  0.274\n"
+     "    1,     1.464,  1.870,  1.062\n"
+     "    ...\n\n"
+     "A heading row is optional; its cells name the runs, which are numbered 1, 2, ... from the "
+     "left. Leave a cell empty (or enter -1) for a missing value. If your runs are in rows instead, "
+     "with the concentrations in the first row, choose 'Runs are in the table's rows' on the File "
+     "runs tab. File > Open example > Table with a run in each column shows the layout.\n\n"
+     "## Spreadsheet print files (version 3.51)\n\n"
+     "Version 3.51 read a spreadsheet printed to a file (it suggested Lotus 1-2-3 or Quattro Pro). "
+     "A file with a line 'S=' is read in that format:\n\n"
      "    S=NS\n"
      "    #     S1      S2      S3      S4  ...\n"
      "    RN1   v11     v12     v13     v14 ...\n"
@@ -126,6 +138,7 @@ constexpr HelpTopic kTopics[] = {
      "turn it off on the File runs tab so that negative log10(v) or Y values can be analysed; only "
      "exactly -1 is then treated as missing.\n\n"
      "## MPA files\n\n"
+     "MPA files are read by the classic interface (View > Classic interface), as in version 3.51. "
      "An MPA file is produced by the MicroPlate Analysis program (also from S. Brooks), which prints "
      "a table of cell number against slope (the velocity of each well). After three header lines "
      "each line holds one 'cell, velocity' record. Tell the program how many velocities make up "
@@ -141,10 +154,10 @@ constexpr HelpTopic kTopics[] = {
      "variety of conditions. In some cases it may not converge properly, so the Gauss-Newton "
      "algorithm is also included. Both give best-fit values \xC2\xB1 1 standard deviation.\n\n"
      "The fit needs initial estimates of the parameters. Normally the program calculates them from "
-     "the data. If those are too far from the answer you can enter your own (see Fit settings).\n\n"
+     "the data. If those are too far from the answer you can enter your own (see Fitting options).\n\n"
      "## Reading the results\n\n"
      "The Results tab shows, from the top: a verdict on the fit, the constants, the range of the data, "
-     "the Prediction box, the graph, and folded sections with the residual tests and the iteration "
+     "the Calculate box, the graph, and folded sections with the residual tests and the iteration "
      "history. On a wide window the constants sit beside the graph.\n\n"
      "Each value is rounded to the precision its standard deviation supports, for example "
      "Km = 2.71 \xC2\xB1 0.14. Hold the mouse over a value to see all its digits; Copy results and the "
@@ -199,7 +212,7 @@ constexpr HelpTopic kTopics[] = {
      "Drag to pan, scroll to zoom, double-click or 'Reset view' to fit the axes, and right-click for "
      "more options. The graph is at least a third as high as it is wide, and the residual strip a "
      "quarter; the Results tab scrolls when the window is too small for them. The predictions of the "
-     "Prediction box are marked by crosses of their colours."},
+     "Calculate box are marked by crosses of their colours."},
 
     {"What residuals tell you",
      "It is sometimes difficult to decide which equation suits your data. Two non-parametric tests "
@@ -219,7 +232,7 @@ constexpr HelpTopic kTopics[] = {
 
     {"Using your data as a standard curve",
      "The fitted curve can be used as a standard curve. Enter your data, choose an equation and fit; "
-     "the Prediction box on the Results tab then reads values off the curve. Type a v to get the [S] "
+     "the Calculate box on the Results tab then reads values off the curve. Type a v to get the [S] "
      "that gives it (Calculate > Find [S] for a given v, Alt+X), or an [S] to get its v (Find v for a "
      "given [S], Alt+Y); the names follow the equation's columns. Each answer is marked on the graph "
      "by a cross of its colour.\n\n"
@@ -228,10 +241,10 @@ constexpr HelpTopic kTopics[] = {
      "values read from the fitted curve. A value outside the range of the data is marked "
      "'extrapolated'."},
 
-    {"Fit settings",
-     "The Fit section, below Data and Equation, holds the settings most fits never need: fixed "
+    {"Fitting options",
+     "The Fitting options, below Data and Equation, hold the settings most fits never need: fixed "
      "parameters, bounds, the fitting method, the initial estimates and the iteration limit. They "
-     "start folded unless one differs from the default; click the Fit heading to show them. The Fit "
+     "start folded unless one differs from the default; click the heading to show them. The Fit "
      "button stays below them either way. The Calculate menu has the method and the estimates too.\n\n"
      "## Method\n\n"
      "If the program has trouble finding the best-fit values with the default Marquardt-Levenberg "

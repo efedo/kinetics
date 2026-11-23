@@ -1,8 +1,8 @@
-// Left panel: the Data, Equation and Fit sections (v3.51 Edit menu: "enter/
+// Left panel: the Data, Equation and Fitting options sections (v3.51 Edit menu: "enter/
 // edit Data" and "edit equation Type").
 //
 // Top to bottom in the order of the steps in the strip above: enter the
-// data, choose the equation, fit. Each section folds. The Fit section holds
+// data, choose the equation, fit. Each section folds. The Fitting options section holds
 // the parameter and minimisation settings, which most fits never need and
 // so start folded, with the Fit button below them. While a run from an
 // imported file is shown, its points take the table's place, read-only.
@@ -298,6 +298,8 @@ bool play_button(const char* label) {
     const float tw = std::round(th * 0.87f);  // and width
     const float gap = std::round(fs * 0.45f);
     const ImVec2 size(std::round(tw + gap + ts.x + fs * 2.4f), std::round(ImGui::GetFrameHeight() * 1.3f));
+    // Centred in the column.
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, std::floor((ImGui::GetContentRegionAvail().x - size.x) * 0.5f)));
     const bool pressed = primary_button("##fit", size);
     const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
     const float x = std::floor((a.x + b.x - (tw + gap + ts.x)) * 0.5f);
@@ -343,10 +345,10 @@ void App::draw_fit_button() {
         warning_text("The last fit did not converge: see the Results tab.", analysis_->fit.message);
 }
 
-// The fit settings, which fold, and below them the Fit button, which stays
-// in view when they are folded.
+// The fitting options, which fold, and below them the Fit button, which
+// stays in view when they are folded.
 void App::draw_fit_section() {
-    section_fold_heading(Section::Fit, "Fit", fitOpen_);
+    section_fold_heading(Section::Fit, "Fitting options", fitOpen_);
     help_link(HelpId::FittingOptions);
     heading_gap();
     if (fitOpen_) {

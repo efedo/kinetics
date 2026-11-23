@@ -292,8 +292,9 @@ void App::draw_run_banner() {
     if (ImGui::BeginChild("##runbanner", ImVec2(0, 0),
                           ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysUseWindowPadding)) {
         ImGui::AlignTextToFramePadding();
-        ImGui::Text("Showing %s #%d (%d of %d) from %s", sheet ? "run" : "dataset", item->runNumber, i + 1, count,
-                    import_.path.filename().string().c_str());
+        const std::string name = run_name(item->runNumber);
+        ImGui::Text("Showing %s #%d%s (%d of %d) from %s", sheet ? "run" : "dataset", item->runNumber,
+                    name.empty() ? "" : (" " + name).c_str(), i + 1, count, import_.path.filename().string().c_str());
         item_tooltip(import_.path.string());
         ImGui::SameLine();
         ImGui::BeginDisabled(i <= 0);
@@ -436,17 +437,17 @@ void App::draw_menu_bar() {
         if (ImGui::MenuItem("Save data table...", "Ctrl+S"))
             show_save_dialog(FilePurpose::SaveTable, tablePath_.empty() ? default_dir() + "data.csv" : tablePath_.string());
         ImGui::Separator();
+        // (MPA plate-reader files are read by the classic interface.)
         if (ImGui::MenuItem("Import spreadsheet file of runs..."))
             show_open_dialog(FilePurpose::ImportSpreadsheet, default_dir());
-        ImGui::SetItemTooltip("Concentrations, then one row of velocities per run");
-        if (ImGui::MenuItem("Import plate-reader file (MPA, velocities only)..."))
-            show_open_dialog(FilePurpose::ImportMpa, default_dir());
+        ImGui::SetItemTooltip("A table saved as CSV or text: the concentrations in the first column and a run in "
+                              "each further column (or in rows), or version 3.51's print-to-file format");
         if (ImGui::MenuItem("Close imported file", nullptr, false, haveImport)) close_import();
         if (ImGui::BeginMenu("Open example")) {
             if (ImGui::MenuItem("Michaelis-Menten data table")) open_example(Example::MichaelisMenten);
             if (ImGui::MenuItem("Arrhenius data table")) open_example(Example::Arrhenius);
-            if (ImGui::MenuItem("Spreadsheet file with four runs (Hill)")) open_example(Example::SpreadsheetRuns);
-            if (ImGui::MenuItem("MPA file with two datasets (inhibition)")) open_example(Example::MpaPlate);
+            if (ImGui::MenuItem("Table with a run in each column (Hill)")) open_example(Example::RunsInColumns);
+            if (ImGui::MenuItem("Spreadsheet print file with four runs (Hill)")) open_example(Example::SpreadsheetRuns);
             ImGui::EndMenu();
         }
         ImGui::Separator();

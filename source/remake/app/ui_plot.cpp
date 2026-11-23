@@ -221,8 +221,9 @@ void App::draw_plot(const ImVec2& size) {
     auto main_plot = [&](const ImVec2& plotSize) {
         // No legend: the parameters are just above the graph.
         if (!ImPlot::BeginPlot("##graph", plotSize, ImPlotFlags_NoTitle | ImPlotFlags_NoLegend)) return;
-        // With the residual strip below, its X axis carries the labels.
-        ImPlot::SetupAxes(strip ? nullptr : xLabel.c_str(), yLabel.c_str(), strip ? ImPlotAxisFlags_NoTickLabels : 0, 0);
+        // With the residual strip below, the X axis's title goes under the
+        // strip, and its numbers under both.
+        ImPlot::SetupAxes(strip ? nullptr : xLabel.c_str(), yLabel.c_str());
         if (refit) ImPlot::SetupAxesLimits(pd.xmin, pd.xmax, pd.ymin, pd.ymax, ImPlotCond_Always);
         origin_axes(true);
 
@@ -256,7 +257,7 @@ void App::draw_plot(const ImVec2& size) {
                                "X = %s", kin::fmt_g(*pd.xIntercept, 4).c_str());
         }
 
-        // The Prediction box's answers, each a cross of its colour on the curve.
+        // The Calculate box's answers, each a cross of its colour on the curve.
         for (int k = 0; k < 2; ++k) {
             const auto& pt = predictions[static_cast<size_t>(k)];
             if (!pt) continue;

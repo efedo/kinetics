@@ -76,7 +76,7 @@ inline void field_label(const char* label) {
 
 inline void field_label(const std::string& label) { field_label(label.c_str()); }
 
-// The colours of the Prediction box's two answers and of their crosses on
+// The colours of the Calculate box's two answers and of their crosses on
 // the graph: orange and purple, which read on both themes.
 inline ImVec4 prediction_colour(int i) {
     return i == 0 ? ImVec4(0.93f, 0.49f, 0.13f, 1.0f) : ImVec4(0.70f, 0.38f, 0.90f, 1.0f);

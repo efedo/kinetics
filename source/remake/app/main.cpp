@@ -11,13 +11,13 @@
 //   --report <file>           append reports (current report options) to <file>:
 //                             one per run with --analyse-all, else the --fit result
 //   --tab <name>              results | graph | residuals | standard | runs | report
-//                             (standard: the Results tab's Prediction box)
+//                             (standard: the Results tab's Calculate box)
 //   --plot <1..10>            plot type (v3.51 numbering)
 //   --show <name>             help | about | report-options | fit-options | graph | residuals
 //   --theme <name>            system (default) | dark | light
 //   --text-size <percent>     text size, 80 to 150 (default 100)
-//   --predict-x <y>           Prediction box: read X off the curve for this Y
-//   --predict-y <x>           Prediction box: read Y off the curve for this X
+//   --predict-x <y>           Calculate box: read X off the curve for this Y
+//   --predict-y <x>           Calculate box: read Y off the curve for this X
 //   --classic                 start in the classic (v3.51) interface
 //   --classic-keys <keys>     start in the classic interface and type these keys,
 //                             e.g. "alt+t,a,enter" (see classic::Host::inject_keys)
@@ -149,7 +149,7 @@ app::Fonts load_fonts() {
 // "graph" and "residuals" are parts of the Results tab (App::show_window).
 std::optional<app::Tab> tab_from_name(const std::string& n) {
     if (n == "results") return app::Tab::Results;
-    if (n == "standard") return app::Tab::Results;  // the Prediction box
+    if (n == "standard") return app::Tab::Results;  // the Calculate box
     if (n == "runs") return app::Tab::FileRuns;
     if (n == "report") return app::Tab::Report;
     return std::nullopt;

@@ -25,7 +25,8 @@ namespace kin {
 // measurement.
 struct SpreadsheetRun {
     int number = 0;
-    std::vector<double> y;  // one per substrate column
+    std::vector<double> y;  // one per substrate column; NaN for an empty cell
+    std::string name;       // the run's heading in a table of runs, if any
 };
 
 struct SpreadsheetFile {
@@ -33,9 +34,9 @@ struct SpreadsheetFile {
     std::vector<SpreadsheetRun> runs;
 
     const SpreadsheetRun* find_run(int number) const;
-    // Points of a run, skipping missing values. With negativeIsMissing (the
-    // v3.51 rule) every negative value is skipped; otherwise only exactly -1,
-    // so that negative log10(v) or Y values can be analysed.
+    // Points of a run, skipping missing values: empty cells, and with
+    // negativeIsMissing (the v3.51 rule) every negative value; otherwise only
+    // exactly -1, so that negative log10(v) or Y values can be analysed.
     std::vector<Point> points(const SpreadsheetRun& run, bool negativeIsMissing) const;
 };
 
@@ -44,6 +45,26 @@ struct SpreadsheetParse {
     std::string error;
 };
 SpreadsheetParse parse_spreadsheet(std::string_view text);
+
+// ---- Table of runs (a spreadsheet saved as CSV or text) -------------------
+//
+//   [S],  Run 1,  Run 2, ...
+//   0.5,  0.474,  0.727
+//   1,    1.464,  1.870
+//   ...
+//
+// One run per column: the first column holds the concentrations and each
+// further column a run's velocities. With runsInRows the table is read the
+// other way round: the first row holds the concentrations and each further
+// row a run, its name in the first cell. Cells are separated as in
+// parse_xy_table. A heading row (column) names the runs, which are numbered
+// 1, 2, ... in order; a column (row) without a number is left out. An empty
+// or non-numeric cell is a missing value, and so is -1.
+SpreadsheetParse parse_run_table(std::string_view text, bool runsInRows = false);
+
+// Whether the text is in v3.51's spreadsheet format (a line "S=n"), rather
+// than a table of runs.
+bool is_v351_spreadsheet(std::string_view text);
 
 // ---- MPA file (MicroPlate Analysis program) -------------------------------
 //

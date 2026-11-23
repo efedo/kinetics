@@ -1,4 +1,4 @@
-// Right panel: the Results tab (verdict, parameters, the Prediction box,
+// Right panel: the Results tab (verdict, parameters, the Calculate box,
 // graph and residuals on one screen; v3.51 View menu and Calculate > new X /
 // new Y) and the Report tab.
 
@@ -173,7 +173,7 @@ std::vector<VerdictLine> fit_verdict(const kin::Analysis& a) {
 
     if (!a.linear && f.status != kin::FitStatus::Converged)
         bad.push_back({VerdictLevel::Bad, "The fit did not converge, so these may not be the best values.",
-                       f.message + " Try a higher iteration limit or other initial estimates (in the Fit section)."});
+                       f.message + " Try a higher iteration limit or other initial estimates (Fitting options)."});
 
     // Parameters held at a bound: the data did not determine them.
     std::vector<bool> atBound(def.params.size(), false);
@@ -191,7 +191,7 @@ std::vector<VerdictLine> fit_verdict(const kin::Analysis& a) {
         bad.push_back({VerdictLevel::Bad,
                        name(j) + " could not be determined: it reached its " + (h.upper ? "upper" : "lower") +
                            " limit of " + kin::fmt_g(h.bound, 3) + ".",
-                       "This equation may not suit these data; try another, or change the limit (Fit section "
+                       "This equation may not suit these data; try another, or change the limit (Fitting options "
                        "> Show bounds)."});
     }
 
@@ -351,8 +351,9 @@ void App::draw_right_panel() {
     // Each tab appears once it has something to show.
     const bool haveFit = analysis_.has_value();
     bool keepFile = true;
-    tab("Results", Tab::Results, &App::draw_results_tab);
+    // An imported file's runs come first: the work with a file starts there.
     if (haveImport) tab("File runs", Tab::FileRuns, &App::draw_file_runs_tab, &keepFile);
+    tab("Results", Tab::Results, &App::draw_results_tab);
     if (haveFit) tab("Report", Tab::Report, &App::draw_report_tab);
     requestedTab_.reset();
     ImGui::EndTabBar();
@@ -431,19 +432,18 @@ void App::draw_getting_started() {
         ImGui::SetItemTooltip("Loads ten Michaelis-Menten points. More examples: File > Open example.");
     } else {
         ImGui::PushStyleColor(ImGuiCol_Text, palette().accent);
-        ImGui::TextWrapped("Next: press Fit (F5), at the bottom of the Fit section on the left.");
+        ImGui::TextWrapped("Next: press Fit (F5), under Fitting options on the left.");
         ImGui::PopStyleColor();
     }
 
     ImGui::Dummy(ImVec2(0.0f, fs * 1.5f));
     ImGui::TextDisabled("Have a file with many runs?");
     if (ImGui::SmallButton("Import spreadsheet file...")) show_open_dialog(FilePurpose::ImportSpreadsheet, default_dir());
-    item_tooltip("Substrate concentrations and one row of velocities per run. Help > Using file data "
-                 "describes the format.");
-    same_line_if_fits(button_width("Import MPA file..."));
-    if (ImGui::SmallButton("Import MPA file...")) show_open_dialog(FilePurpose::ImportMpa, default_dir());
-    item_tooltip("Velocities only, from the MicroPlate Analysis program. Help > Using file data "
-                 "describes the format.");
+    item_tooltip("A table saved as CSV or text, with the concentrations in the first column and a run in each "
+                 "further column. Help > Using file data describes the formats.");
+    same_line_if_fits(button_width("Try an example file"));
+    if (ImGui::SmallButton("Try an example file")) open_example(Example::RunsInColumns);
+    ImGui::SetItemTooltip("Four runs of an allosteric enzyme, one per column");
     ImGui::Dummy(ImVec2(0.0f, fs * 0.5f));
     ImGui::TextDisabled("New to the program?");
     const char* link = "Read Getting started in the help (F1)";
@@ -509,13 +509,13 @@ void App::draw_results_summary(const kin::Analysis& a, bool twoColumns) {
     ImGui::Spacing();
     const float fs = ImGui::GetFontSize();
     const float gap = fs * 1.5f;
-    const float boxW = fs * 17.5f;  // the Prediction box
+    const float boxW = fs * 17.5f;  // the Calculate box
     if (twoColumns) {
         ImGui::BeginGroup();
         draw_parameter_values(a);
         ImGui::EndGroup();
         ImGui::SameLine(0.0f, gap);
-        // The notes, and the Prediction box beside them when there is room
+        // The notes, and the Calculate box beside them when there is room
         // for both; otherwise the box goes below.
         const float notesW = ImGui::GetContentRegionAvail().x;
         const bool boxBeside = notesW >= fs * 14.0f + gap + boxW;
@@ -800,7 +800,7 @@ void App::draw_prediction_box(const kin::Analysis& a, float width) {
     if (visible) {
         push_heading_font();
         ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted("Prediction");
+        ImGui::TextUnformatted("Calculate");
         ImGui::PopFont();
         help_link(HelpId::StandardCurve);
 

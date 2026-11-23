@@ -57,7 +57,7 @@ std::string g_defaultLocation;  // must outlive the dialog
 
 // Filters must stay valid until the callback runs, so they are static.
 const SDL_DialogFileFilter kTableFilters[] = {{"Data tables (*.csv, *.txt)", "csv;txt"}, {"All files", "*"}};
-const SDL_DialogFileFilter kSpreadsheetFilters[] = {{"Spreadsheet print files (*.prn, *.txt, *.csv)", "prn;txt;csv"},
+const SDL_DialogFileFilter kSpreadsheetFilters[] = {{"Spreadsheet files (*.csv, *.tsv, *.txt, *.prn)", "csv;tsv;txt;prn"},
                                                     {"All files", "*"}};
 const SDL_DialogFileFilter kMpaFilters[] = {{"MPA output (*.txt, *.prn, *.dat)", "txt;prn;dat"}, {"All files", "*"}};
 const SDL_DialogFileFilter kReportFilters[] = {{"Reports (*.txt, *.prn, *.csv)", "txt;prn;csv"}, {"All files", "*"}};
@@ -197,7 +197,7 @@ namespace {
 const char* accept_for(FilePurpose p) {
     switch (p) {
         case FilePurpose::OpenTable: return ".csv,.txt,text/plain,text/csv";
-        case FilePurpose::ImportSpreadsheet: return ".prn,.txt,.csv,text/plain";
+        case FilePurpose::ImportSpreadsheet: return ".csv,.tsv,.txt,.prn,text/csv,text/plain";
         case FilePurpose::ImportMpa: return ".txt,.prn,.dat,text/plain";
         default: return "";
     }

@@ -3,6 +3,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <utility>
@@ -334,6 +335,10 @@ void App::open_example(Example e) {
         set_model(kin::ModelId::HillGt0);
         import_spreadsheet(ex / "spreadsheet_runs.txt");
         break;
+    case Example::RunsInColumns:
+        set_model(kin::ModelId::HillGt0);
+        import_spreadsheet(ex / "runs_in_columns.csv");
+        break;
     case Example::MpaPlate:
         set_model(kin::ModelId::InhibitionLinear);
         set_table({{0, NAN}, {0.5, NAN}, {1, NAN}, {2, NAN}, {4, NAN}, {8, NAN}, {16, NAN}, {32, NAN}});
@@ -446,7 +451,9 @@ void App::import_spreadsheet(const std::filesystem::path& path) {
         error("Can't open " + path.filename().string() + ".", path.string());
         return;
     }
-    auto parsed = kin::parse_spreadsheet(*text);
+    // v3.51's print-to-file format, or a table with a run in each column.
+    const bool table = !kin::is_v351_spreadsheet(*text);
+    auto parsed = table ? kin::parse_run_table(*text, false) : kin::parse_spreadsheet(*text);
     if (!parsed.file) {
         error(path.filename().string() + ": " + parsed.error, path.string());
         return;
@@ -455,12 +462,44 @@ void App::import_spreadsheet(const std::filesystem::path& path) {
     import_.type = ImportType::Spreadsheet;
     import_.path = path;
     import_.sheet = std::move(parsed.file);
+    import_.table = table;
+    import_.runsInRows = false;
+    import_.tableText = table ? *text : std::string();
     import_.mpaText.clear();
     import_.selectedRun = import_.sheet->runs.front().number;
     batch_ = BatchState{};
     batch_.firstRun = import_.selectedRun;
     batchStale_ = false;
     requestedTab_ = Tab::FileRuns;
+}
+
+void App::set_runs_in_rows(bool rows) {
+    if (!import_.table || rows == import_.runsInRows) return;
+    auto parsed = kin::parse_run_table(import_.tableText, rows);
+    if (!parsed.file) {
+        // The file stays as it was read.
+        error(import_.path.filename().string() + ": " + parsed.error, import_.path.string());
+        return;
+    }
+    import_.runsInRows = rows;
+    leave_run_view();
+    batch_ = BatchState{};
+    batchStale_ = false;
+    import_.sheet = std::move(parsed.file);
+    import_.selectedRun = import_.sheet->runs.front().number;
+    batch_.firstRun = import_.selectedRun;
+}
+
+std::string App::run_name(int number) const {
+    if (import_.type != ImportType::Spreadsheet || !import_.sheet) return {};
+    const auto* run = import_.sheet->find_run(number);
+    if (!run || run->name.empty()) return {};
+    // A heading that only repeats the number ("3", "Run 3") adds nothing.
+    std::string lower;
+    for (char c : run->name) lower += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    const std::string n = std::to_string(number);
+    if (lower == n || lower == "run " + n || lower == "run" + n || lower == "run #" + n) return {};
+    return run->name;
 }
 
 void App::import_mpa(const std::filesystem::path& path) {

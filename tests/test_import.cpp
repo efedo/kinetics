@@ -140,8 +140,8 @@ TEST_CASE(import_spreadsheet_errors, "import: spreadsheet format errors") {
 TEST_CASE(import_spreadsheet_points, "import: run points stop at the shorter of the X and Y lists") {
     SpreadsheetFile f;
     f.x = {1, 2, 3};
-    SpreadsheetRun shortRun{1, {0.5, -1}};
-    SpreadsheetRun longRun{2, {0.5, 0.6, 0.7, 0.8}};
+    SpreadsheetRun shortRun{1, {0.5, -1}, {}};
+    SpreadsheetRun longRun{2, {0.5, 0.6, 0.7, 0.8}, {}};
     CHECK(same_points(f.points(shortRun, false), {{1, 0.5}}));
     CHECK(same_points(f.points(longRun, true), {{1, 0.5}, {2, 0.6}, {3, 0.7}}));
     CHECK(f.find_run(1) == nullptr);  // runs not added to the file
@@ -289,4 +289,75 @@ TEST_CASE(import_spreadsheet_huge_numbers, "import: spreadsheet column count or 
     // The largest accepted run numbers still parse.
     const auto ok = parse_spreadsheet("S=2\n# 1 2\n999999999 0.1 0.2\n#");
     CHECK(ok.error.empty() && ok.file && ok.file->runs.size() == 1 && ok.file->runs[0].number == 999999999);
+}
+
+TEST_CASE(import_run_table_columns, "import: table of runs, one per column, with headings and gaps") {
+    const auto p = parse_run_table("\"[S]\",\"WT\",\"Mutant\",\n0.5,1.0,0.5,\n1,1.5,,\n2,1.8,n/a,\n\nnotes,here\n");
+    CHECK(p.file.has_value());
+    if (!p.file) return;
+    CHECK(p.file->x == std::vector<double>({0.5, 1, 2}));
+    CHECK(p.file->runs.size() == 2);  // the empty last column is left out
+    if (p.file->runs.size() != 2) return;
+    CHECK(p.file->runs[0].number == 1 && p.file->runs[0].name == "WT");
+    CHECK(p.file->runs[1].number == 2 && p.file->runs[1].name == "Mutant");
+    CHECK(p.file->runs[0].y == std::vector<double>({1.0, 1.5, 1.8}));
+    // Empty and non-numeric cells are missing.
+    const auto mutant = p.file->points(p.file->runs[1], true);
+    CHECK(mutant.size() == 1 && mutant[0].x == 0.5 && mutant[0].y == 0.5);
+    CHECK(p.file->points(p.file->runs[1], false).size() == 1);
+}
+
+TEST_CASE(import_run_table_rows, "import: table of runs read across the rows") {
+    // The same runs as the spreadsheet example, a run per row, without names.
+    const auto p = parse_run_table("0.5 1 2\n0.47 1.46 3.86\n0.73 1.87 -1\n", true);
+    CHECK(p.file.has_value());
+    if (!p.file) return;
+    CHECK(p.file->x == std::vector<double>({0.5, 1, 2}));
+    CHECK(p.file->runs.size() == 2);
+    if (p.file->runs.size() != 2) return;
+    CHECK(p.file->runs[0].name.empty() && p.file->runs[1].y == std::vector<double>({0.73, 1.87, -1}));
+    CHECK(p.file->points(p.file->runs[1], true).size() == 2);  // -1 is missing
+    // Names in the first cell of each row.
+    const auto named = parse_run_table("run,0.5,1\nA,1,2\nB,3,4\n", true);
+    CHECK(named.file && named.file->runs.size() == 2 && named.file->runs[1].name == "B" &&
+          named.file->runs[1].y == std::vector<double>({3, 4}));
+}
+
+TEST_CASE(import_run_table_errors, "import: table of runs without concentrations or runs") {
+    CHECK(parse_run_table("").error ==
+          "No concentrations found: the first column should hold the concentrations, and each further column a run.");
+    CHECK(parse_run_table("a,b\nc,d\n").error ==
+          "No concentrations found: the first column should hold the concentrations, and each further column a run.");
+    CHECK(parse_run_table("[S]\n1\n2\n").error ==
+          "No runs found: the first column should hold the concentrations, and each further column a run.");
+    CHECK(parse_run_table("x,y\n1,a\n2,b\n").error ==
+          "No runs found: the first column should hold the concentrations, and each further column a run.");
+    CHECK(parse_run_table("0.5,1\n", true).error ==
+          "No runs found: the first row should hold the concentrations, and each further row a run.");
+}
+
+TEST_CASE(import_run_table_example, "import: the runs-in-columns example matches the spreadsheet example") {
+    const auto cols = read_text_file(test::kExamples / "runs_in_columns.csv");
+    const auto sheet = read_text_file(test::kExamples / "spreadsheet_runs.txt");
+    CHECK(cols && sheet);
+    if (!cols || !sheet) return;
+    CHECK(!is_v351_spreadsheet(*cols) && is_v351_spreadsheet(*sheet));
+    const auto a = parse_run_table(*cols);
+    const auto b = parse_spreadsheet(*sheet);
+    CHECK(a.file && b.file);
+    if (!a.file || !b.file) return;
+    CHECK(a.file->x == b.file->x && a.file->runs.size() == b.file->runs.size());
+    for (size_t r = 0; r < a.file->runs.size() && r < b.file->runs.size(); ++r) {
+        CHECK(a.file->runs[r].name == "Run " + std::to_string(r + 1));
+        // The empty cell of run 3 and the file's -1 give the same points.
+        CHECK(same_points(a.file->points(a.file->runs[r], true), b.file->points(b.file->runs[r], true)));
+    }
+}
+
+TEST_CASE(import_v351_detection, "import: v3.51's spreadsheet format is recognised by its S= line") {
+    CHECK(is_v351_spreadsheet("S=2\n#1 2\n1 0.1 0.2\n#"));
+    CHECK(is_v351_spreadsheet("title\n  \"s = 3\"\n"));
+    CHECK(!is_v351_spreadsheet("[S],v\n1,2\n"));
+    CHECK(!is_v351_spreadsheet("substrate=1\n"));
+    CHECK(!is_v351_spreadsheet(""));
 }
