@@ -12,8 +12,8 @@ constexpr HelpTopic kTopics[] = {
     {"Getting started",
      "Kinetics fits an equation to your measurements, for example Michaelis-Menten to velocities "
      "measured at several substrate concentrations, and gives each constant with its standard "
-     "deviation. The strip under the menus shows the five steps (Data, Equation, Fit, Results, "
-     "Report) and how far you are; click a step to go to it.\n\n"
+     "deviation. The strip under the menus shows the six steps (Run, Data, Equation, Fit, "
+     "Results, Report) and how far you are; click a step to go to it.\n\n"
      "## Try it with the example\n\n"
      "- Choose File > Open example > Michaelis-Menten data table. Ten [S] and v values fill the table on "
      "the left.\n"
@@ -32,7 +32,8 @@ constexpr HelpTopic kTopics[] = {
      "Type or paste your values into the table (two columns copied from a spreadsheet paste as they "
      "are), or read a saved table into it with the Open button. Add units under the column headings if "
      "you like; they then appear with the results, on the graph and in reports. To fit several runs "
-     "with the same equation, add runs (the + beside the run's name, or the Runs tab) or import a "
+     "with the same equation, add runs (the + at the top of the Data section, or the Runs tab) or "
+     "import a "
      "spreadsheet of runs; see Runs and files. File > Save analysis keeps the whole analysis."},
 
     {"Choosing an equation",
@@ -97,9 +98,9 @@ constexpr HelpTopic kTopics[] = {
 
     {"Runs and files",
      "An analysis holds one or more runs, for example one per enzyme preparation or per day, all "
-     "fitted with the same equation and fitting options. The heading above the data table names "
-     "the run shown; its arrows step through the runs, the + adds one, and a click on the name lists "
-     "them all. The data table always shows, and edits, the run shown.\n\n"
+     "fitted with the same equation and fitting options. The Run line at the top of the Data "
+     "section chooses the run shown from a list; its arrows step through the runs and the + adds "
+     "one. The data table always shows, and edits, the run shown.\n\n"
      "## The Runs tab\n\n"
      "The Runs tab lists every run with its number of points, the verdict on its fit and its "
      "constants. Click a run to show it; right-click it to fit it alone, rename it or delete it "

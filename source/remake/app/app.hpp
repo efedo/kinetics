@@ -3,9 +3,9 @@
 // Edit, Calculate, View, Help) and its Alt-key shortcuts are kept; the
 // screens become panels and tabs of one window.
 //
-// The window, top to bottom: the menus, a strip with the five steps of the
-// work (Data, Equation, Fit, Results, Report), the left panel (the run
-// shown, then its Data, the Equation and the Fitting options) beside the
+// The window, top to bottom: the menus, a strip with the six steps of the
+// work (Run, Data, Equation, Fit, Results, Report), the left panel (the
+// Data of the run shown, the Equation and the Fitting options) beside the
 // right one (Runs, Results and Report tabs), and a status bar naming the
 // data, or with the latest message.
 //
@@ -222,8 +222,9 @@ private:
 
     // ---- UI: left panel (ui_data.cpp) -----------------------------------
     void draw_left_panel();
-    // The run shown: its number and name, with buttons to step through the runs.
-    void draw_run_heading();
+    // The run shown, at the top of the Data section, with buttons to step
+    // through the runs and add one.
+    void draw_run_row();
     // The left panel's three sections, in the order of the steps; each folds.
     enum class Section { Data, Equation, Fit };
     // A section's heading. It opens the section, and scrolls it into view,

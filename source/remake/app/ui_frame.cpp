@@ -1,4 +1,4 @@
-// The window frame: the menus and shortcuts, the strip with the five steps
+// The window frame: the menus and shortcuts, the strip with the six steps
 // of the work, the banner shown with a run from an imported file, the two
 // panels and the splitter between them, and the status bar.
 
@@ -178,18 +178,28 @@ void App::draw_panels(const ImVec2& size) {
 void App::draw_step_strip() {
     int invalid = 0;
     const size_t n = kin::clean_data(table_points(&invalid)).size();
-    const bool several = runs_.size() > 1;
-    const std::string runText = several ? "run " + std::to_string(current_ + 1) + " of " + std::to_string(runs_.size()) + ", " : "";
 
-    // 1. Data
-    std::string label;
+    // 1. Run: which of the analysis's runs is shown.
+    const int runCount = static_cast<int>(runs_.size());
+    const std::string own = run_own_name(current_);
+    std::string label = "Run " + std::to_string(current_ + 1) + (runCount > 1 ? " of " + std::to_string(runCount) : "") +
+                        (own.empty() ? "" : ": " + own);
+    if (step_item(1, fit_text(label, ImGui::GetFontSize() * 14.0f), StepState::Done,
+                  "Go to the runs: the run shown is chosen at the top of the Data section, and the Runs tab lists "
+                  "them all (Alt+W)")) {
+        gotoSection_ = Section::Data;
+        requestedTab_ = Tab::Runs;
+    }
+
+    // 2. Data
+    step_chevron();
     StepState state;
     std::string tip = "Go to the data table";
     if (n == 0) {
-        label = "Data: " + runText + "none yet";
+        label = "Data: none yet";
         state = StepState::Ready;
     } else {
-        label = "Data: " + runText + std::to_string(n) + " point" + (n == 1 ? "" : "s");
+        label = "Data: " + std::to_string(n) + " point" + (n == 1 ? "" : "s");
         state = StepState::Done;
         if (invalid > 0) {
             label += ", " + std::to_string(invalid) + " not a number";
@@ -200,21 +210,21 @@ void App::draw_step_strip() {
     }
     // A click on a step only goes to its place in the window; it never fits
     // or writes anything.
-    if (step_item(1, label, state, tip)) {
+    if (step_item(2, label, state, tip)) {
         gotoSection_ = Section::Data;
         focusTable_ = true;
     }
 
-    // 2. Equation
+    // 3. Equation
     step_chevron();
     const bool started = n > 0 || analysis_;
-    if (step_item(2, std::string("Equation: ") + equation_name(model_), started ? StepState::Done : StepState::Pending,
+    if (step_item(3, std::string("Equation: ") + equation_name(model_), started ? StepState::Done : StepState::Pending,
                   "Go to the equation (Alt+T)")) {
         gotoSection_ = Section::Equation;
         focusModel_ = true;
     }
 
-    // 3. Fit
+    // 4. Fit
     step_chevron();
     const kin::Analysis* shown = analysis_ ? &*analysis_ : nullptr;
     const bool outOfDate = analysis_ && stale_;
@@ -238,10 +248,10 @@ void App::draw_step_strip() {
         label = "Fit";
         state = StepState::Pending;
     }
-    if (step_item(3, label, state, "Go to the fit settings and the Fit button. Fit, or F5, fits."))
+    if (step_item(4, label, state, "Go to the fit settings and the Fit button. Fit, or F5, fits."))
         gotoSection_ = Section::Fit;
 
-    // 4. Results
+    // 5. Results
     step_chevron();
     tip = "Go to the results (Alt+L)";
     if (!shown) {
@@ -256,12 +266,12 @@ void App::draw_step_strip() {
     } else {
         state = verdict_state(*shown, label);
     }
-    if (step_item(4, label, state, tip) && shown) requestedTab_ = Tab::Results;
+    if (step_item(5, label, state, tip) && shown) requestedTab_ = Tab::Results;
 
-    // 5. Report
+    // 6. Report
     step_chevron();
     const bool haveFit = any_results();
-    if (step_item(5, reportWritten_ ? "Report: written" : "Report",
+    if (step_item(6, reportWritten_ ? "Report: written" : "Report",
                   reportWritten_ ? StepState::Done : haveFit ? StepState::Ready : StepState::Pending,
                   haveFit ? "Go to the Report tab, to write or copy a report of the results (Alt+P writes it)"
                           : "Report options (Alt+O). Reports can be written once there are results.")) {

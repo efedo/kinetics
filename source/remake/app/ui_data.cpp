@@ -1,11 +1,11 @@
-// Left panel: the run shown, then the Data, Equation and Fitting options
-// sections (v3.51 Edit menu: "enter/edit Data" and "edit equation Type").
+// Left panel: the Data, Equation and Fitting options sections (v3.51 Edit
+// menu: "enter/edit Data" and "edit equation Type").
 //
 // Top to bottom in the order of the steps in the strip above: enter the
 // data, choose the equation, fit. Each section folds. The Fitting options
 // hold the parameter and minimisation settings, which most fits never need
 // and so start folded, with the Fit button below them. Every run is edited
-// in the same table; the heading at the top says which run it is.
+// in the same table; the top of the Data section says which run it is.
 
 #include <imgui.h>
 #include <imgui_stdlib.h>
@@ -108,7 +108,6 @@ void App::draw_left_panel() {
     // Alt+D and Alt+T put the cursor in a section, which must be open.
     if (focusTable_) dataOpen_ = true;
     if (focusModel_) equationOpen_ = true;
-    draw_run_heading();
     draw_data_table();
     // The table fills the height left over by what follows it, measured here
     // and used on the next frame.
@@ -118,45 +117,29 @@ void App::draw_left_panel() {
     leftFooterHeight_ = ImGui::GetCursorPosY() - footerTop;
 }
 
-void App::draw_run_heading() {
+// The run the table shows, at the top of the Data section: a list of the
+// runs to choose from, buttons to step through them, and one to add a run.
+void App::draw_run_row() {
     const int n = static_cast<int>(runs_.size());
+    const float fs = ImGui::GetFontSize();
+    field_label("Run");
     const std::string own = run_own_name(current_);
-    const std::string title = "Run " + std::to_string(current_ + 1) + (n > 1 ? " of " + std::to_string(n) : "") +
-                              (own.empty() ? "" : ": " + own);
-    const ImGuiStyle& st = ImGui::GetStyle();
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-
-    // The title, which lists the runs to choose from when clicked.
-    push_heading_font();
-    const float h = ImGui::GetFrameHeight();
-    const ImVec2 p = ImGui::GetCursorScreenPos();
-    const float right = p.x + ImGui::GetContentRegionAvail().x;
-    const float maxW = std::max(0.0f, ImGui::GetContentRegionAvail().x - ImGui::GetFontSize() * 7.0f);
-    const std::string shown = fit_text(title, maxW);
-    const ImVec2 ts = ImGui::CalcTextSize(shown.c_str());
-    const ImVec2 size(ts.x + st.FramePadding.x * 2.0f, h);
-    ImGui::AlignTextToFramePadding();
-    const bool clicked = ImGui::InvisibleButton("##runtitle", size);
-    const bool hovered = ImGui::IsItemHovered();
-    if (hovered && n > 1)
-        dl->AddRectFilled(p, ImVec2(p.x + size.x, p.y + size.y), ImGui::GetColorU32(ImGuiCol_ButtonHovered),
-                          st.FrameRounding);
-    dl->AddText(ImVec2(p.x + st.FramePadding.x, p.y + std::round((h - ts.y) * 0.5f)), ImGui::GetColorU32(ImGuiCol_Text),
-                shown.c_str());
-    ImGui::PopFont();
-    item_tooltip(n > 1 ? title + ". Click to choose another run; the Runs tab lists them all (Alt+W)."
-                       : title + ". Add runs here or on the Runs tab, to fit several with the same equation.");
-    if (clicked && n > 1) ImGui::OpenPopup("##runlist");
-    if (ImGui::BeginPopup("##runlist")) {
+    const std::string preview = std::to_string(current_ + 1) + (n > 1 ? " of " + std::to_string(n) : "") +
+                                (own.empty() ? "" : ": " + own);
+    // Room for the three buttons after the list.
+    const float buttons = ImGui::GetFrameHeight() * 3.0f + ImGui::GetStyle().ItemSpacing.x * 3.0f;
+    ImGui::SetNextItemWidth(std::clamp(ImGui::GetContentRegionAvail().x - buttons, fs * 6.0f, fs * 16.0f));
+    if (ImGui::BeginCombo("##run", preview.c_str())) {
         for (int k = 0; k < n; ++k) {
             ImGui::PushID(k);
             if (ImGui::Selectable(run_label(k).c_str(), k == current_) && k != current_) select_run(k);
+            if (k == current_) ImGui::SetItemDefaultFocus();
             ImGui::PopID();
         }
-        ImGui::EndPopup();
+        ImGui::EndCombo();
     }
-
-    // Step through the runs, or add one.
+    item_tooltip(n > 1 ? "The run this table shows. The Runs tab lists every run with its results (Alt+W)."
+                       : "Add runs, with the + here or on the Runs tab, to fit several with the same equation.");
     ImGui::SameLine();
     ImGui::BeginDisabled(current_ <= 0);
     if (ImGui::ArrowButton("##prevrun", ImGuiDir_Left)) select_run(current_ - 1);
@@ -170,13 +153,6 @@ void App::draw_run_heading() {
     ImGui::SameLine();
     if (ImGui::Button("+##addrun", ImVec2(ImGui::GetFrameHeight(), 0.0f))) add_run();
     ImGui::SetItemTooltip("Add a run, with an empty table");
-    help_link(HelpId::FileData);
-
-    // Underlined like the sections below it.
-    const ImVec4 a = palette().accent;
-    const float lineY = std::round(p.y + h + st.ItemSpacing.y * 0.5f);
-    dl->AddLine(ImVec2(p.x, lineY), ImVec2(right, lineY), ImGui::GetColorU32(ImVec4(a.x, a.y, a.z, 0.6f)), 2.0f);
-    heading_gap();
 }
 
 void App::section_fold_heading(Section s, const char* title, bool& open, bool first) {
@@ -489,7 +465,7 @@ void App::draw_data_table() {
     const bool arrhenius = def.family == kin::Family::Arrhenius;
 
     // The heading, with the table's buttons beside it.
-    section_fold_heading(Section::Data, "Data", dataOpen_);
+    section_fold_heading(Section::Data, "Data", dataOpen_, true);
     struct Btn {
         const char* label;
         const char* tip;
@@ -521,6 +497,7 @@ void App::draw_data_table() {
 
     if (rows_.empty() || !rows_.back().x.empty() || !rows_.back().y.empty()) rows_.push_back({});
     if (!dataOpen_) return;
+    draw_run_row();
 
     // After Fit (F5) with nothing to fit, say what to do here instead of in
     // an error box; the note goes once there are data.
