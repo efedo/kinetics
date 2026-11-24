@@ -380,28 +380,26 @@ void App::draw_menu_bar() {
     const bool haveFit = analysis_.has_value();
     const bool haveReport = any_results();
 
+    // File: the analysis as a whole (its runs, equation and options), and
+    // the report, which is today's print-out. The run shown's own data is
+    // under Edit, beside the table's other commands.
     if (ImGui::BeginMenu("File")) {
-        // The analysis as a whole: its runs, equation and options.
         if (ImGui::MenuItem("New analysis", "Ctrl+N")) new_analysis();
         if (ImGui::MenuItem("Open analysis...", "Ctrl+O")) show_open_dialog(FilePurpose::OpenAnalysis, default_dir());
+        ImGui::SetItemTooltip("An analysis saved by Kinetics (.kinetics)");
         if (ImGui::MenuItem("Save analysis", "Ctrl+S")) save_analysis_or_ask();
         if (ImGui::MenuItem("Save analysis as...")) ask_analysis_file();
         ImGui::Separator();
-        // Runs from and to spreadsheets (MPA plate-reader files are read by
+        // Runs from and to other programs (MPA plate-reader files are read by
         // the classic interface).
         if (ImGui::MenuItem("Import spreadsheet of runs...")) show_open_dialog(FilePurpose::ImportRuns, default_dir());
         ImGui::SetItemTooltip("A table saved as CSV or text: the concentrations in the first column and a run in "
-                              "each further column (or in rows), or version 3.51's print-to-file format. It replaces "
-                              "the runs there are.");
-        if (ImGui::MenuItem("Export runs as a spreadsheet..."))
+                              "each further column (or in rows), or version 3.51's print-to-file format. Its runs "
+                              "replace the runs there are.");
+        if (ImGui::MenuItem("Export runs to CSV..."))
             show_save_dialog(FilePurpose::ExportRuns, default_dir() + (runsFile_.empty() ? std::string("runs") : runsFile_.stem().string()) + ".csv");
-        ImGui::SetItemTooltip("Every run's data in one CSV file, a run in each column");
+        ImGui::SetItemTooltip("Every run's data in one CSV file, a run in each column, for a spreadsheet");
         ImGui::Separator();
-        if (ImGui::MenuItem("Read a data table into this run..."))
-            show_open_dialog(FilePurpose::OpenTable, default_dir());
-        ImGui::SetItemTooltip("Two columns of numbers, in place of the run's data (Undo in the status bar)");
-        if (ImGui::MenuItem("Save this run as a data table..."))
-            show_save_dialog(FilePurpose::SaveTable, tablePath_.empty() ? default_dir() + "data.csv" : tablePath_.string());
         if (ImGui::BeginMenu("Open example")) {
             if (ImGui::MenuItem("Michaelis-Menten data table")) open_example(Example::MichaelisMenten);
             if (ImGui::MenuItem("Arrhenius data table")) open_example(Example::Arrhenius);
@@ -410,9 +408,10 @@ void App::draw_menu_bar() {
             ImGui::EndMenu();
         }
         ImGui::Separator();
-        if (ImGui::MenuItem("Report options...", "Alt+O")) show_report_options();
+        // The report's options and Copy are on the Report tab (Alt+O).
         if (ImGui::MenuItem("Write report", "Alt+P", false, haveReport)) write_report();
-        if (ImGui::MenuItem("Copy report to clipboard", nullptr, false, haveReport)) copy_report();
+        ImGui::SetItemTooltip("Add the report of every fitted run to the report file. Its options are on the "
+                              "Report tab (Alt+O).");
         if (!kIsWeb) {  // a browser tab is closed by the browser
             ImGui::Separator();
             if (ImGui::MenuItem("Quit", "Alt+Q")) quit_ = true;
@@ -432,7 +431,13 @@ void App::draw_menu_bar() {
         if (ImGui::MenuItem("Enter/edit data", "Alt+D")) focusTable_ = true;
         if (ImGui::MenuItem("Add a run")) add_run();
         ImGui::Separator();
+        // The run shown's data (Undo in the status bar).
         if (ImGui::MenuItem("Paste data from clipboard")) paste_table_from_clipboard();
+        if (ImGui::MenuItem("Read data from a file...")) show_open_dialog(FilePurpose::OpenTable, default_dir());
+        ImGui::SetItemTooltip("Two columns of numbers, in place of this run's data (also the Data section's Open)");
+        if (ImGui::MenuItem("Save data to a file..."))
+            show_save_dialog(FilePurpose::SaveTable, tablePath_.empty() ? default_dir() + "data.csv" : tablePath_.string());
+        ImGui::SetItemTooltip("This run's data as a two-column CSV file (also the Data section's Save)");
         if (ImGui::MenuItem("Sort data")) sort_table();
         if (ImGui::MenuItem("Clear data")) clear_table();
         ImGui::EndMenu();

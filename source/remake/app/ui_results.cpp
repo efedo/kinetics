@@ -877,8 +877,7 @@ void App::draw_report_tab() {
         ImGui::TextDisabled("%s", report_.status.c_str());
     }
 
-    // The options, folded under a one-line summary (File > Report options
-    // opens them here).
+    // The options, folded under a one-line summary (Alt+O opens them here).
     ImGui::Spacing();
     if (openReportSection_) {
         ImGui::SetNextItemOpen(true);
