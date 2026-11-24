@@ -16,6 +16,7 @@
 //   --plot <1..10>            plot type (v3.51 numbering)
 //   --show <name>             help | about | report-options | fit-options | graph | residuals
 //   --theme <name>            system (default) | dark | light
+//   --style <name>            default | soft | slate | paper | flat (the original look)
 //   --text-size <percent>     text size, 80 to 150 (default 100)
 //   --predict-x <y>           Calculate box: read X off the curve for this Y
 //   --predict-y <x>           Calculate box: read Y off the curve for this X
@@ -54,7 +55,7 @@
 namespace {
 
 struct Options {
-    std::string open, import, importMpa, tab, screenshot, show, report, theme, classicKeys, predictX, predictY;
+    std::string open, import, importMpa, tab, screenshot, show, report, theme, style, classicKeys, predictX, predictY;
     bool classic = false;
     char model = 0;
     int plot = 0;
@@ -84,6 +85,7 @@ Options parse_args(int argc, char** argv) {
         else if (a == "--plot") o.plot = std::atoi(next().c_str());
         else if (a == "--screenshot") o.screenshot = next();
         else if (a == "--theme") o.theme = next();
+        else if (a == "--style") o.style = next();
         else if (a == "--text-size") o.textSize = std::atoi(next().c_str());
         else if (a == "--predict-x") o.predictX = next();
         else if (a == "--predict-y") o.predictY = next();
@@ -332,6 +334,9 @@ int main(int argc, char** argv) {
 
     SDL_SetAppMetadata("Kinetics", KINETICS_VERSION, "org.sbrooks.kinetics");
     if (c.screenshot) SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
+    // The window's icon is the program's (kinetics.rc, resource 1).
+    SDL_SetHint(SDL_HINT_WINDOWS_INTRESOURCE_ICON, "1");
+    SDL_SetHint(SDL_HINT_WINDOWS_INTRESOURCE_ICON_SMALL, "1");
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Kinetics", SDL_GetError(), nullptr);
         return 1;
@@ -415,6 +420,7 @@ int main(int argc, char** argv) {
     if (auto t = tab_from_name(o.tab)) c.app.select_tab(*t);
     else if (o.tab == "graph" || o.tab == "residuals") c.app.show_window(o.tab);
     if (!o.show.empty()) c.app.show_window(o.show);
+    if (auto st = app::style_from_name(o.style)) app::set_style(*st);
     if (auto t = app::theme_from_name(o.theme)) app::set_theme(*t);
     if (o.textSize > 0) c.app.set_text_scale(o.textSize);
     if (!o.predictX.empty() || !o.predictY.empty()) c.app.set_predictions(o.predictX, o.predictY);

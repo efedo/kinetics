@@ -1,0 +1,4 @@
+// The Windows program icon (Explorer, the title bar and the taskbar). SDL
+// uses resource 1 for the window: see SDL_HINT_WINDOWS_INTRESOURCE_ICON in
+// main.cpp. kinetics.ico is drawn by tools/make_icon.py.
+1 ICON "kinetics.ico"

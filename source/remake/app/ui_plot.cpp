@@ -114,7 +114,7 @@ void App::draw_plot_controls() {
 
     field_label("Plot");
     ImGui::SetNextItemWidth(std::min(ImGui::GetFontSize() * 18.0f, ImGui::GetContentRegionAvail().x * 0.45f));
-    if (ImGui::BeginCombo("##plottype", kin::plot_name(plotType_, m).c_str(), ImGuiComboFlags_HeightLarge)) {
+    if (begin_combo("##plottype", kin::plot_name(plotType_, m).c_str(), ImGuiComboFlags_HeightLarge)) {
         for (const auto& g : plot_groups()) {
             std::vector<kin::PlotType> here;
             for (auto t : g.types)
@@ -139,7 +139,7 @@ void App::draw_plot_controls() {
     same_line_if_fits(displayW + helpW);
     bool changed = false;
     ImGui::SetNextItemWidth(displayW);
-    if (ImGui::BeginCombo("##display", "Display", ImGuiComboFlags_HeightLarge)) {
+    if (begin_combo("##display", "Display", ImGuiComboFlags_HeightLarge)) {
         changed |= ImGui::Checkbox("Include the origin", &plotOptions_.includeOrigin);
         if (!residual) changed |= ImGui::Checkbox("Extend the curve to the Y axis", &plotOptions_.extendToYAxis);
         if (interceptMeaningful) {

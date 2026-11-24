@@ -143,8 +143,13 @@ void App::draw_panels(const ImVec2& size) {
     const float maxW = std::max(minW, std::min(fs * 34.0f, size.x * 0.5f));
     const float leftW = std::clamp(leftWidthEm_ * fs, minW, maxW);
     const float splitW = std::round(fs * 0.9f);
+    // A style with cards draws each panel as a rounded card on the tinted
+    // window; the gap between them is the splitter.
+    const bool cards = style_cards();
+    const ImGuiChildFlags panel = cards ? ImGuiChildFlags_AlwaysUseWindowPadding : ImGuiChildFlags_None;
+    if (cards) ImGui::PushStyleColor(ImGuiCol_ChildBg, card_colour());
 
-    if (ImGui::BeginChild("##left", ImVec2(leftW, size.y), ImGuiChildFlags_None)) draw_left_panel();
+    if (ImGui::BeginChild("##left", ImVec2(leftW, size.y), panel)) draw_left_panel();
     ImGui::EndChild();
 
     ImGui::SameLine(0.0f, 0.0f);
@@ -160,15 +165,17 @@ void App::draw_panels(const ImVec2& size) {
         save_settings();
     }
     ImGui::SetItemTooltip("Drag to widen or narrow the panels; double-click for the usual width");
-    ImGui::GetWindowDrawList()->AddLine(
-        ImVec2(p.x + splitW * 0.5f, p.y), ImVec2(p.x + splitW * 0.5f, p.y + size.y),
-        ImGui::GetColorU32(ImGui::IsItemActive() ? ImGuiCol_SeparatorActive : hot ? ImGuiCol_SeparatorHovered
-                                                                                  : ImGuiCol_Separator),
-        hot ? 2.0f : 1.0f);
+    if (!cards || hot)
+        ImGui::GetWindowDrawList()->AddLine(
+            ImVec2(p.x + splitW * 0.5f, p.y), ImVec2(p.x + splitW * 0.5f, p.y + size.y),
+            ImGui::GetColorU32(ImGui::IsItemActive() ? ImGuiCol_SeparatorActive : hot ? ImGuiCol_SeparatorHovered
+                                                                                      : ImGuiCol_Separator),
+            hot ? 2.0f : 1.0f);
 
     ImGui::SameLine(0.0f, 0.0f);
-    if (ImGui::BeginChild("##right", ImVec2(0, size.y), ImGuiChildFlags_None)) draw_right_panel();
+    if (ImGui::BeginChild("##right", ImVec2(0, size.y), panel)) draw_right_panel();
     ImGui::EndChild();
+    if (cards) ImGui::PopStyleColor();
 }
 
 // ===========================================================================
@@ -502,6 +509,15 @@ void App::draw_menu_bar() {
                     save_settings();
                 }
             }
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Style")) {
+            const StyleChoice now = style_choice();
+            for (const StyleChoice s : kStyles)
+                if (ImGui::MenuItem(style_label(s), nullptr, now == s) && s != now) {
+                    set_style(s);
+                    save_settings();
+                }
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Theme")) {

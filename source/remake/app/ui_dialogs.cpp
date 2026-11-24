@@ -147,7 +147,7 @@ void App::draw_report_options_form() {
     ImGui::TableSetupColumn("field", ImGuiTableColumnFlags_WidthFixed, w);
 
     form_row("Format");
-    if (ImGui::BeginCombo("##format", kin::report_format_name(o.format).c_str())) {
+    if (begin_combo("##format", kin::report_format_name(o.format).c_str())) {
         for (auto f : {kin::ReportFormat::Short, kin::ReportFormat::Medium, kin::ReportFormat::Long})
             if (ImGui::Selectable(kin::report_format_name(f).c_str(), f == o.format)) o.format = f;
         ImGui::EndCombo();

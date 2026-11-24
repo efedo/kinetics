@@ -1,4 +1,4 @@
-# Kinetics
+# <img src="web/icon.svg" width="40" align="top" alt=""> Kinetics
 
 A modern re-implementation of **Steve Brooks's kinetics program**, *SB's Kinetics Program* 3.51, for **non-linear curve fitting of enzyme kinetics data**. The original MS-DOS program is described in:
 
@@ -40,7 +40,7 @@ The original was written in 16-bit Borland C++. This version uses **SDL3** for t
    Hold the mouse over a point on the graph for its exact values; its row in the data table lights up.
 4. **Keep the results.** Copy results, beside the graph's buttons, puts the parameters and each point's fitted value and residual on the clipboard as tables. On the Report tab, Write report (Alt+P) adds a report of every fitted run to a text file. File > Save analysis (Ctrl+S) keeps the runs, equation and options in a `.kinetics` file to open again later.
 
-The strip under the menus shows the six steps (Run, Data, Equation, Fit, Results, Report) and how far you are; click a step to go to it. An analysis can hold several runs, all fitted with the same equation: add them with the + at the top of the Data section or on the Runs tab, or import a spreadsheet of runs from the File menu, then press Fit all runs on the Runs tab and step through them. The Help menu covers each step in more detail, starting with Getting started. The theme follows the system's light or dark setting unless you choose one under View > Theme, and View > Text size (Ctrl+= and Ctrl+-) makes the text larger or smaller.
+The strip under the menus shows the six steps (Run, Data, Equation, Fit, Results, Report) and how far you are; click a step to go to it. An analysis can hold several runs, all fitted with the same equation: add them with the + at the top of the Data section or on the Runs tab, or import a spreadsheet of runs from the File menu, then press Fit all runs on the Runs tab and step through them. The Help menu covers each step in more detail, starting with Getting started. The theme follows the system's light or dark setting unless you choose one under View > Theme; View > Style offers other looks (Soft, Slate, Paper, and Flat, the original one), and View > Text size (Ctrl+= and Ctrl+-) makes the text larger or smaller.
 
 To use the original 1992 interface instead, choose View > Classic interface or press Ctrl+F12 (see [Classic interface](#classic-interface)).
 
@@ -186,7 +186,7 @@ The window keeps the original menu structure (File, Edit, Calculate, View, Help)
 - *Analyses:* `.kinetics` text files holding the runs, the equation, the fitting options and the units.
 - *Reports:* text files, appended run after run. SHORT and MEDIUM reports can be comma-separated for spreadsheets.
 
-**Preferences** (report options, method, units, theme, text size, panel width, last folder) are saved in `kinetics.ini` in the per-user application data folder (`%APPDATA%\Kinetics` on Windows). Preferences saved by earlier versions in `%APPDATA%\SB\Kinetics` are moved there on the first start. This file replaces `INPUT.DAT` and `OUTPUT.DAT`.
+**Preferences** (report options, method, units, theme, style, text size, panel width, last folder) are saved in `kinetics.ini` in the per-user application data folder (`%APPDATA%\Kinetics` on Windows). Preferences saved by earlier versions in `%APPDATA%\SB\Kinetics` are moved there on the first start. This file replaces `INPUT.DAT` and `OUTPUT.DAT`.
 
 **Command line (desktop).** All options are optional. They are useful for scripting and for producing screenshots. The web build accepts the same options as URL parameters.
 
@@ -202,6 +202,7 @@ Kinetics --model b --import examples/spreadsheet_runs.txt --analyse-all --report
 - `--report <file>`: after `--fit` or `--analyse-all`, append the report of every fitted run to the file
 - `--tab results|graph|residuals|standard|runs|report`, `--plot <1-10>`, `--show help|about|report-options|fit-options`: choose the view (graph, residuals and standard, the Calculate box, are parts of the Results tab)
 - `--theme system|dark|light`: colour theme (also under View > Theme; by default the same as the system)
+- `--style default|soft|slate|paper|flat`: the look (also under View > Style)
 - `--text-size <80-150>`: text size in percent (also under View > Text size; 100 by default)
 - `--predict-x <y>`, `--predict-y <x>`: fill the Calculate box: read X off the curve for this Y, or Y for this X
 - `--classic`: start in the classic interface; `--classic-keys "alt+g,n"` also types those keys into it (for screenshots: text and key names such as `enter`, `esc`, `up`, `f1`, `alt+x`)

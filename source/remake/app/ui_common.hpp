@@ -76,6 +76,23 @@ inline void field_label(const char* label) {
 
 inline void field_label(const std::string& label) { field_label(label.c_str()); }
 
+// A drop-down list. In the styles with cards its arrow is a light chevron
+// inside the field rather than ImGui's square button.
+inline bool begin_combo(const char* id, const char* preview, ImGuiComboFlags flags = 0) {
+    if (!style_cards()) return ImGui::BeginCombo(id, preview, flags);
+    // The field's place, before the list (if it opens) becomes the window.
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const float w = ImGui::CalcItemWidth(), h = ImGui::GetFrameHeight();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImU32 ink = ImGui::GetColorU32(ImGuiCol_TextDisabled);
+    const bool open = ImGui::BeginCombo(id, preview, flags | ImGuiComboFlags_NoArrowButton);
+    const float r = h * 0.14f;
+    const ImVec2 c(p.x + w - h * 0.55f, p.y + h * 0.5f);
+    dl->AddLine(ImVec2(c.x - r, c.y - r * 0.5f), ImVec2(c.x, c.y + r * 0.5f), ink, 1.6f);
+    dl->AddLine(ImVec2(c.x, c.y + r * 0.5f), ImVec2(c.x + r, c.y - r * 0.5f), ink, 1.6f);
+    return open;
+}
+
 // The colours of the Calculate box's two answers and of their crosses on
 // the graph: orange and purple, which read on both themes.
 inline ImVec4 prediction_colour(int i) {

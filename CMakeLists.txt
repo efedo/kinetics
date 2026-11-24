@@ -91,6 +91,9 @@ if(KINETICS_BUILD_APP)
         set_property(TARGET kinetics APPEND PROPERTY LINK_DEPENDS "${CMAKE_SOURCE_DIR}/web/shell.html")
     else()
         set_target_properties(kinetics PROPERTIES OUTPUT_NAME "Kinetics")
+        if(WIN32)
+            target_sources(kinetics PRIVATE source/remake/app/kinetics.rc)  # the program icon
+        endif()
         # Example data next to the executable, for File > Open example
         add_custom_command(TARGET kinetics POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_directory

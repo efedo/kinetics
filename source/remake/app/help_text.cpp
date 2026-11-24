@@ -319,9 +319,10 @@ constexpr HelpTopic kTopics[] = {
      "results, the graph and the residuals share one screen, and a verdict says whether the fit can "
      "be trusted. Every run of a file is held at once and can be edited, runs can be added by hand, "
      "and a whole analysis can be saved and opened again.\n\n"
-     "View > Text size (Ctrl+= and Ctrl+-) makes the text larger or smaller, and View > Theme chooses "
-     "a light or dark theme; by default it follows the system. Drag the line between the two panels "
-     "to widen either. Messages, such as a file that cannot be opened, appear in the status bar "
+     "View > Text size (Ctrl+= and Ctrl+-) makes the text larger or smaller, View > Theme chooses "
+     "a light or dark theme (by default it follows the system), and View > Style chooses the look: "
+     "Soft, Slate, Paper, or Flat, the look of the first versions. Drag the gap between the two "
+     "panels to widen either. Messages, such as a file that cannot be opened, appear in the status bar "
      "instead of a dialog, and Clear can be undone from there."},
 };
 

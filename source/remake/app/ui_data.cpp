@@ -129,7 +129,7 @@ void App::draw_run_row() {
     // Room for the three buttons after the list.
     const float buttons = ImGui::GetFrameHeight() * 3.0f + ImGui::GetStyle().ItemSpacing.x * 3.0f;
     ImGui::SetNextItemWidth(std::clamp(ImGui::GetContentRegionAvail().x - buttons, fs * 6.0f, fs * 16.0f));
-    if (ImGui::BeginCombo("##run", preview.c_str())) {
+    if (begin_combo("##run", preview.c_str())) {
         for (int k = 0; k < n; ++k) {
             ImGui::PushID(k);
             if (ImGui::Selectable(run_label(k).c_str(), k == current_) && k != current_) select_run(k);
@@ -184,7 +184,7 @@ void App::draw_model_section() {
     // The list is wider than the panel, to fit the "use when" lines.
     ImGui::SetNextWindowSizeConstraints(ImVec2(fs * 30.0f, 0.0f),
                                         ImVec2(FLT_MAX, ImGui::GetMainViewport()->WorkSize.y * 0.85f));
-    if (ImGui::BeginCombo("##model", equation_name(model_), ImGuiComboFlags_HeightLargest)) {
+    if (begin_combo("##model", equation_name(model_), ImGuiComboFlags_HeightLargest)) {
         const ImGuiStyle& st = ImGui::GetStyle();
         const float lineH = ImGui::GetTextLineHeight();
         const ImVec2 thumb(fs * 2.2f, lineH * 1.5f);
@@ -342,7 +342,7 @@ bool play_button(const char* label) {
     const float x = std::floor((a.x + b.x - (tw + gap + ts.x)) * 0.5f);
     const float cy = std::floor((a.y + b.y) * 0.5f);
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    const ImU32 ink = ImGui::GetColorU32(ImGuiCol_Text);  // dimmed when disabled
+    const ImU32 ink = ImGui::GetColorU32(primary_text_colour());  // dimmed when disabled
     dl->AddTriangleFilled(ImVec2(x, cy - th * 0.5f), ImVec2(x + tw, cy), ImVec2(x, cy + th * 0.5f), ink);
     dl->AddText(ImVec2(x + tw + gap, std::floor(cy - ts.y * 0.5f)), ink, label);
     ImGui::PopFont();
@@ -546,9 +546,11 @@ void App::draw_data_table() {
                 std::string& unit = c == 0 ? xUnit_ : yUnit_;
                 ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
                 ImGui::PushStyleColor(ImGuiCol_Text, palette().textDim);
+                ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
                 ImGui::SetNextItemWidth(-FLT_MIN);
                 ImGui::InputTextWithHint(c == 0 ? "##xunit" : "##yunit", "unit (optional)", &unit);
                 if (ImGui::IsItemDeactivatedAfterEdit()) save_settings();
+                ImGui::PopStyleVar();
                 ImGui::PopStyleColor(2);
                 item_tooltip(c == 0 ? "The unit of " + std::string(def.xName) + ", e.g. \xC2\xB5M. It is shown with "
                                       "the half-saturation constant, on the graph and in reports."
@@ -595,6 +597,8 @@ void App::draw_data_table() {
                     ImGui::PushStyleColor(ImGuiCol_FrameBg,
                                           bad ? palette().badFill : last ? ImGui::GetStyleColorVec4(ImGuiCol_FrameBg)
                                                                 : ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+                    // Likewise only the new-point row has framed cells.
+                    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, last ? ImGui::GetStyle().FrameBorderSize : 0.0f);
                     ImGui::SetNextItemWidth(-FLT_MIN);
                     if (focusTable_ && i == 0 && c == 0) {
                         ImGui::SetKeyboardFocusHere();
@@ -608,6 +612,7 @@ void App::draw_data_table() {
                         if (dataSource_ != "Entered by hand" && dataSource_.find("(edited)") == std::string::npos)
                             dataSource_ += " (edited)";
                     }
+                    ImGui::PopStyleVar();
                     ImGui::PopStyleColor();
                     if (bad) ImGui::SetItemTooltip("Not a number: this row is left out of the fit");
                 }

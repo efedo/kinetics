@@ -16,6 +16,11 @@ namespace app {
 
 enum class ThemeChoice { System, Dark, Light };
 
+// The look: sizes, rounding and colours, each in a light and a dark version.
+// Default is Slate when light and Soft when dark; Flat is the original look,
+// without cards.
+enum class StyleChoice { Default, Soft, Slate, Paper, Flat };
+
 // Colours the UI code uses directly. Plain text needs none: keep colour for
 // what needs attention.
 struct Palette {
@@ -39,6 +44,19 @@ ThemeChoice theme_choice();
 
 // Call when the operating system's light or dark setting changes.
 void system_theme_changed();
+
+void set_style(StyleChoice style);
+StyleChoice style_choice();
+const char* style_name(StyleChoice style);   // "default", ... (settings, command line)
+const char* style_label(StyleChoice style);  // "Default", ... (menu)
+std::optional<StyleChoice> style_from_name(std::string_view name);
+inline constexpr StyleChoice kStyles[] = {StyleChoice::Default, StyleChoice::Soft, StyleChoice::Slate,
+                                          StyleChoice::Paper, StyleChoice::Flat};
+// Whether the panels are cards on a tinted background, and their colour.
+bool style_cards();
+ImVec4 card_colour();
+// Text on the accent-filled main button.
+ImVec4 primary_text_colour();
 
 // Colours of the theme in use.
 const Palette& palette();

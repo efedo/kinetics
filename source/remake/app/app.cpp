@@ -59,6 +59,7 @@ void App::load_settings() {
     yUnit_ = s.get("data.yUnit");
     import_.negativeIsMissing = s.get_bool("import.negativeIsMissing", true);
     import_.mpaCount = std::max(1, s.get_int("import.mpaCount", 8));
+    if (auto st = style_from_name(s.get("view.style", "default"))) set_style(*st);
     if (auto t = theme_from_name(s.get("view.theme", "system"))) set_theme(*t);
     set_text_scale(s.get_int("view.textSize", 100));
     leftWidthEm_ = static_cast<float>(s.get_int("view.leftWidth", 260)) / 10.0f;
@@ -85,6 +86,7 @@ void App::save_settings() const {
     s.set("data.yUnit", yUnit_);
     s.set_bool("import.negativeIsMissing", import_.negativeIsMissing);
     s.set_int("import.mpaCount", import_.mpaCount);
+    s.set("view.style", style_name(style_choice()));
     s.set("view.theme", theme_name(theme_choice()));
     s.set_int("view.textSize", textScale_);
     s.set_int("view.leftWidth", static_cast<int>(std::lround(leftWidthEm_ * 10.0f)));
