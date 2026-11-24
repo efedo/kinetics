@@ -26,8 +26,14 @@
     args.push('--' + key);
     if (value !== '') args.push(value);
   });
+  // The build, which the published page names (the Pages workflow replaces
+  // the token with the commit). index.js and index.wasm are fetched as
+  // index.js?v=<build>, so that a browser never pairs a cached file of one
+  // build with the page of another: the two must come from the same build.
+  var build = '@BUILD_ID@';
   var Module = {
     arguments: args,
+    locateFile: function (path, prefix) { return prefix + path + '?v=' + build; },
     canvas: document.getElementById('canvas'),
     setStatus: function (text) { if (text) statusText.textContent = text; },
     onRuntimeInitialized: function () {

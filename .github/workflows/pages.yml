@@ -47,10 +47,17 @@ jobs:
           cmake --build --preset wasm-release
           ctest --preset wasm-release
 
+      # The page fetches index.js and index.wasm with the commit in their
+      # addresses (index.js?v=<commit>), so that after a deployment no browser
+      # mixes a cached file with new ones (Pages lets them be kept 10 minutes).
       - name: Collect the page
         run: |
           mkdir _site
           cp out/build/wasm-release/index.html out/build/wasm-release/index.js out/build/wasm-release/index.wasm _site/
+          build="${GITHUB_SHA::12}"
+          sed -i -E "s/@BUILD_ID@/${build}/g; s/src=(\"?)index\.js/src=\1index.js?v=${build}/" _site/index.html
+          grep -q "index.js?v=${build}" _site/index.html
+          grep -q "'${build}'\|\"${build}\"" _site/index.html
 
       - uses: actions/configure-pages@v5
         if: ${{ !github.event.repository.private }}
