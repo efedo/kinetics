@@ -2,7 +2,8 @@
 // options (v3.51's file of runs, Calculate > file data, without its run at a
 // time through the table). Click a run to show it in both panels; right-click
 // it to fit it alone, rename it or delete it. A run is added by hand, or a
-// whole spreadsheet of runs imported from the File menu.
+// whole spreadsheet of runs imported from the File menu; Clear all runs
+// leaves one empty run.
 
 #include <imgui.h>
 #include <imgui_stdlib.h>
@@ -140,9 +141,16 @@ void App::draw_runs_tab() {
     }
     if (ImGui::Button("+ Add run")) add_run();
     ImGui::SetItemTooltip("A new run with an empty table, to type or paste its data into");
+    ImGui::SameLine();
+    ImGui::BeginDisabled(n < 2 && !have_data());
+    const bool clearAll = ImGui::Button("Clear all runs");
+    ImGui::EndDisabled();
+    ImGui::SetItemTooltip("Remove every run and its results, leaving one empty run (Undo in the status bar). The "
+                          "equation and fitting options stay.");
 
     // Changes to the list, after it is drawn.
-    if (fitAt >= 0) fit_run(fitAt);
+    if (clearAll) clear_all_runs();
+    else if (fitAt >= 0) fit_run(fitAt);
     else if (deleteAt >= 0) delete_run(deleteAt);
     else if (selectAt >= 0) select_run(selectAt);
 }

@@ -183,7 +183,7 @@ void App::draw_plot(const ImVec2& size) {
     const float stripH = std::max(size.x / 4.0f, fs * 6.0f);
     const bool strip = residualStrip_ && plotType_ == kin::PlotType::Normal && !a.data.empty();
     const auto pd = kin::make_plot(a, plotType_, plotOptions_);
-    const auto predictions = prediction_points(a);
+    const auto calculated = calculated_point(a);
 
     // Units for the axes of the normal plot, whose axes are the data's.
     const bool normal = plotType_ == kin::PlotType::Normal;
@@ -257,20 +257,19 @@ void App::draw_plot(const ImVec2& size) {
                                "X = %s", kin::fmt_g(*pd.xIntercept, 4).c_str());
         }
 
-        // The Calculate box's answers, each a cross of its colour on the curve.
-        for (int k = 0; k < 2; ++k) {
-            const auto& pt = predictions[static_cast<size_t>(k)];
-            if (!pt) continue;
-            const auto [X, Y] = kin::plot_coordinates(a, plotType_, pt->first, pt->second);
-            if (!std::isfinite(X) || !std::isfinite(Y)) continue;
-            ImPlotSpec cross;
-            cross.Marker = ImPlotMarker_Cross;
-            cross.MarkerSize = 7.0f;
-            cross.LineWeight = 2.5f;
-            cross.LineColor = faded(prediction_colour(k));
-            cross.Flags = ImPlotItemFlags_NoFit;
-            const double xs[1] = {X}, ys[1] = {Y};
-            ImPlot::PlotScatter(k == 0 ? "##predict0" : "##predict1", xs, ys, 1, cross);
+        // The Calculate box's point: a cross of its answer's colour on the curve.
+        if (calculated) {
+            const auto [X, Y] = kin::plot_coordinates(a, plotType_, calculated->first, calculated->second);
+            if (std::isfinite(X) && std::isfinite(Y)) {
+                ImPlotSpec cross;
+                cross.Marker = ImPlotMarker_Cross;
+                cross.MarkerSize = 7.0f;
+                cross.LineWeight = 2.5f;
+                cross.LineColor = faded(prediction_colour());
+                cross.Flags = ImPlotItemFlags_NoFit;
+                const double xs[1] = {X}, ys[1] = {Y};
+                ImPlot::PlotScatter("##calculated", xs, ys, 1, cross);
+            }
         }
 
         // The point under the mouse: its exact values, and its row in the

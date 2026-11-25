@@ -106,7 +106,8 @@ constexpr HelpTopic kTopics[] = {
      "The Runs tab lists every run with its number of points, the verdict on its fit and its "
      "constants. Click a run to show it; right-click it to fit it alone, rename it or delete it "
      "(Undo in the status bar). Fit all runs (Alt+A) fits every run; Fit (F5), on the left, fits "
-     "the run shown. '+ Add run' adds a run with an empty table, to type or paste its data into.\n\n"
+     "the run shown. '+ Add run' adds a run with an empty table, to type or paste its data into, and "
+     "'Clear all runs' leaves one empty run in place of them all (with Undo).\n\n"
      "## Saving and opening an analysis\n\n"
      "File > Save analysis (Ctrl+S) keeps the runs, the equation, the fitting options and the units "
      "in a .kinetics file, a text file you can read. File > Open analysis (Ctrl+O) brings it back and "
@@ -131,8 +132,8 @@ constexpr HelpTopic kTopics[] = {
      "with the concentrations in the first row, choose 'Runs are in the file's rows' on the Runs "
      "tab, which reads the file again (until a run is edited). Runs measured at different "
      "concentrations, or with replicates, are written by the export with as many rows for a "
-     "concentration as needed, and empty cells elsewhere. File > Open example > Table with a run in "
-     "each column shows the layout.\n\n"
+     "concentration as needed, and empty cells elsewhere. File > Open example > Hill data table with "
+     "four runs shows the layout.\n\n"
      "## Spreadsheet print files (version 3.51)\n\n"
      "Version 3.51 read a spreadsheet printed to a file (it suggested Lotus 1-2-3 or Quattro Pro). "
      "A file with a line 'S=' is read in that format:\n\n"
@@ -224,8 +225,8 @@ constexpr HelpTopic kTopics[] = {
      "mouse over a point to see its values; its row in the data table is highlighted.\n\n"
      "Drag to pan, scroll to zoom, double-click or 'Reset view' to fit the axes, and right-click for "
      "more options. The graph is at least a third as high as it is wide, and the residual strip a "
-     "quarter; the Results tab scrolls when the window is too small for them. The predictions of the "
-     "Calculate box are marked by crosses of their colours."},
+     "quarter; the Results tab scrolls when the window is too small for them. The Calculate box's point "
+     "is marked by an orange cross."},
 
     {"What residuals tell you",
      "It is sometimes difficult to decide which equation suits your data. Two non-parametric tests "
@@ -245,10 +246,11 @@ constexpr HelpTopic kTopics[] = {
 
     {"Using your data as a standard curve",
      "The fitted curve can be used as a standard curve. Enter your data, choose an equation and fit; "
-     "the Calculate box on the Results tab then reads values off the curve. Type a v to get the [S] "
-     "that gives it (Calculate > Find [S] for a given v, Alt+X), or an [S] to get its v (Find v for a "
-     "given [S], Alt+Y); the names follow the equation's columns. Each answer is marked on the graph "
-     "by a cross of its colour.\n\n"
+     "the Calculate box on the Results tab then reads values off the curve. It has a field for [S] "
+     "and one for v, like a unit converter: type a v to get the [S] that gives it (Calculate > Find "
+     "[S] for a given v, Alt+X), or an [S] to get its v (Find v for a given [S], Alt+Y). The arrow "
+     "points from the value you typed to the one calculated, which is shown in orange and marked on "
+     "the graph by an orange cross. The names follow the equation's columns.\n\n"
      "New Y values are calculated from the best-fit parameters and the X ([S], [A] or [I]) you enter. "
      "For new X values the equation is inverted and X is calculated the same way. Both are idealised "
      "values read from the fitted curve. A value outside the range of the data is marked "

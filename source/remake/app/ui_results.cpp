@@ -5,9 +5,13 @@
 #include <imgui.h>
 #include <imgui_stdlib.h>
 
+#include <algorithm>
 #include <array>
 #include <cfloat>
 #include <cmath>
+#include <optional>
+#include <string>
+#include <string_view>
 #include <utility>
 
 #include "app/app.hpp"
@@ -430,7 +434,7 @@ void App::draw_getting_started() {
     item_tooltip("A table saved as CSV or text, with the concentrations in the first column and a run in each "
                  "further column. Help > Runs and files describes the formats. Or add runs by hand on the Runs tab.");
     same_line_if_fits(button_width("Try an example file"));
-    if (ImGui::SmallButton("Try an example file")) open_example(Example::RunsInColumns);
+    if (ImGui::SmallButton("Try an example file")) open_example(Example::HillRuns);
     ImGui::SetItemTooltip("Four runs of an allosteric enzyme, one per column");
     ImGui::Dummy(ImVec2(0.0f, fs * 0.5f));
     ImGui::TextDisabled("New to the program?");
@@ -495,7 +499,7 @@ void App::draw_results_summary(const kin::Analysis& a, bool twoColumns) {
     ImGui::Spacing();
     const float fs = ImGui::GetFontSize();
     const float gap = fs * 1.5f;
-    const float boxW = fs * 17.5f;  // the Calculate box
+    const float boxW = prediction_box_width(a);  // the Calculate box
     if (twoColumns) {
         ImGui::BeginGroup();
         draw_parameter_values(a);
@@ -568,84 +572,101 @@ void App::draw_result_notes(const kin::Analysis& a) {
 }
 
 void App::draw_parameter_values(const kin::Analysis& a) {
-    // The constants are the answer, so they get the larger type; the SD sits
-    // beside each value and the relative SD says how well it is determined.
+    // The constants are the answer, so the table is in the larger type, all of
+    // it: each value, its SD, and the relative SD, which says how well the
+    // data determine it. Lines between the rows hold it together as a table.
     const auto& def = kin::model_def(a.model());
     const auto rows = a.parameter_rows();
+    std::vector<std::string> units(rows.size());
+    bool anyUnit = false, anyTag = false;
+    for (size_t i = 0; i < rows.size(); ++i) {
+        if (i < def.params.size()) units[i] = unit_of(def.params[i].role, a.model());
+        anyUnit = anyUnit || !units[i].empty();
+        anyTag = anyTag || rows[i].fixed || rows[i].derived;
+    }
+    // Columns only for what there is: no gap for units nobody entered.
+    const int cols = 4 + (anyUnit ? 1 : 0) + (anyTag ? 1 : 0);
+    const float fs = ImGui::GetFontSize();
+    ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(fs * 0.45f, fs * 0.2f));
     // As wide as its columns, so that notes can stand beside it.
-    if (!ImGui::BeginTable("##results", 6,
-                           ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoPadOuterX | ImGuiTableFlags_NoHostExtendX))
+    const bool open = ImGui::BeginTable("##results", cols,
+                                        ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoPadOuterX |
+                                            ImGuiTableFlags_NoHostExtendX | ImGuiTableFlags_BordersInnerH);
+    if (!open) {
+        ImGui::PopStyleVar();
         return;
+    }
     ImGui::TableSetupColumn("Parameter");
     ImGui::TableSetupColumn("Value");
     ImGui::TableSetupColumn("\xC2\xB1 SD");
-    ImGui::TableSetupColumn("Unit");
+    if (anyUnit) ImGui::TableSetupColumn("Unit");
     ImGui::TableSetupColumn("Relative SD");
-    ImGui::TableSetupColumn("");
-    // A quiet heading row: dim text, no fill.
+    if (anyTag) ImGui::TableSetupColumn("");
+
+    // Right-aligned in its cell, so that the decimal points of the rows
+    // roughly line up.
+    auto right_aligned = [](const char* s) {
+        const float w = ImGui::CalcTextSize(s).x;
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetContentRegionAvail().x - w));
+    };
+    // A quiet heading row: dim text in the normal type, no fill.
     ImGui::TableNextRow();
-    for (int c = 0; c < 6; ++c) {
-        ImGui::TableSetColumnIndex(c);
-        if (c == 0 || c == 3 || c == 5) continue;
-        ImGui::TextDisabled("%s", ImGui::TableGetColumnName(c));
-        if (c == 4)
-            ImGui::SetItemTooltip("The SD as a percentage of the value. Under about 10%%, the parameter is well "
-                                  "determined by the data.");
-    }
+    ImGui::TableNextColumn();
+    ImGui::TableNextColumn();
+    right_aligned("Value");
+    ImGui::TextDisabled("Value");
+    ImGui::TableNextColumn();
+    ImGui::TextDisabled("\xC2\xB1 SD");
+    if (anyUnit) ImGui::TableNextColumn();
+    ImGui::TableNextColumn();
+    right_aligned("Relative SD");
+    ImGui::TextDisabled("Relative SD");
+    ImGui::SetItemTooltip("The SD as a percentage of the value. Under about 10%%, the parameter is well "
+                          "determined by the data.");
+
+    push_large_font();
     for (size_t i = 0; i < rows.size(); ++i) {
         const auto& r = rows[i];
-        const bool large = !r.derived;
         const auto t = format_value_sd(r.value, r.fixed ? NAN : r.sd);
         const double pct = r.value != 0.0 ? std::fabs(r.sd * 100.0 / r.value) : NAN;
         const std::string full = r.name + " = " + kin::fmt_g(r.value) +
                                  (r.fixed ? std::string(" (fixed)") : " \xC2\xB1 " + kin::fmt_g(r.sd));
-        const std::string unit = i < def.params.size() ? unit_of(def.params[i].role, a.model()) : std::string();
         ImGui::TableNextRow();
-        // The small-type cells sit on the large type's baseline.
-        if (large) push_large_font();
-        const float lineH = ImGui::GetTextLineHeight();
-        if (large) ImGui::PopFont();
-        const float drop = std::max(0.0f, (lineH - ImGui::GetTextLineHeight()) * 0.7f);
-        auto small_cell = [&]() { ImGui::SetCursorPosY(ImGui::GetCursorPosY() + drop); };
-
         ImGui::TableNextColumn();
-        small_cell();
         ImGui::TextUnformatted(r.name.c_str());
         ImGui::TableNextColumn();
-        if (large) push_large_font();
-        {
-            // Right-aligned, so that the decimal points of the rows roughly line up.
-            const float w = ImGui::CalcTextSize(t.value.c_str()).x;
-            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetContentRegionAvail().x - w));
-            ImGui::TextUnformatted(t.value.c_str());
-            ImGui::SetItemTooltip("%s", full.c_str());
-        }
+        right_aligned(t.value.c_str());
+        ImGui::TextUnformatted(t.value.c_str());
+        ImGui::SetItemTooltip("%s", full.c_str());
         ImGui::TableNextColumn();
         if (!r.fixed) {
             const std::string sd = t.sd.empty() ? "\xC2\xB1 n/a" : "\xC2\xB1 " + t.sd;
             ImGui::TextUnformatted(sd.c_str());
             ImGui::SetItemTooltip("%s", full.c_str());
         }
-        if (large) ImGui::PopFont();
+        if (anyUnit) {
+            ImGui::TableNextColumn();
+            if (!units[i].empty()) ImGui::TextDisabled("%s", units[i].c_str());
+        }
         ImGui::TableNextColumn();
-        small_cell();
-        if (!unit.empty()) ImGui::TextDisabled("%s", unit.c_str());
-        ImGui::TableNextColumn();
-        small_cell();
         if (!r.fixed && std::isfinite(pct)) {
             const std::string p = format_percent(pct);
+            right_aligned(p.c_str());
             if (pct <= 10.0) ImGui::TextUnformatted(p.c_str());
             else ImGui::TextColored(palette().warning, "%s", p.c_str());
         }
-        ImGui::TableNextColumn();
-        small_cell();
-        if (r.fixed) ImGui::TextDisabled("fixed");
-        else if (r.derived) {
-            ImGui::TextDisabled("derived");
-            ImGui::SetItemTooltip("kcal/mol x 4.184");
+        if (anyTag) {
+            ImGui::TableNextColumn();
+            if (r.fixed) ImGui::TextDisabled("fixed");
+            else if (r.derived) {
+                ImGui::TextDisabled("derived");
+                ImGui::SetItemTooltip("kcal/mol x 4.184");
+            }
         }
     }
+    ImGui::PopFont();
     ImGui::EndTable();
+    ImGui::PopStyleVar();
 }
 
 void App::draw_residuals_section(const kin::Analysis& a) {
@@ -752,24 +773,62 @@ void App::draw_history_section(const kin::Analysis& a) {
     }
 }
 
-std::array<std::optional<std::pair<double, double>>, 2> App::prediction_points(const kin::Analysis& a) const {
-    std::array<std::optional<std::pair<double, double>>, 2> out;
+std::optional<std::pair<double, double>> App::calculated_point(const kin::Analysis& a) const {
     double v = 0.0;
-    if (parse_cell(predictFromY_, v) == CellState::Number)
-        if (const auto x = kin::inverse(a.model(), v, a.fit.p); x && std::isfinite(*x)) out[0] = std::pair{*x, v};
-    if (parse_cell(predictFromX_, v) == CellState::Number)
-        if (const double y = kin::evaluate(a.model(), v, a.fit.p); std::isfinite(y)) out[1] = std::pair{v, y};
-    return out;
+    if (parse_cell(calcInput_, v) != CellState::Number) return std::nullopt;
+    if (calcInputIsX_) {
+        if (const double y = kin::evaluate(a.model(), v, a.fit.p); std::isfinite(y)) return std::pair{v, y};
+        return std::nullopt;
+    }
+    const auto x = kin::inverse(a.model(), v, a.fit.p);
+    if (!x || !std::isfinite(*x)) return std::nullopt;
+    // A concentration below zero is the formula's other branch, not a point
+    // on the curve: v at or above Vmax, say, is never reached. (Temperatures
+    // and the straight line's X can be negative.)
+    const auto family = kin::model_def(a.model()).family;
+    if (*x < 0.0 && family != kin::Family::Arrhenius && family != kin::Family::Linear) return std::nullopt;
+    return std::pair{*x, v};
+}
+
+// The Calculate box's one row, "[S] [  ]  ->  v [  ]": its labels and sizes,
+// for both the box's width and its drawing.
+struct CalcRow {
+    std::string xLabel, yLabel;
+    float labels = 0.0f;  // both labels, with the space after each
+    float arrow = 0.0f;   // the arrow between the fields, with its margins
+    float field = 0.0f;   // each field, at its full width
+    float width() const { return labels + arrow + 2.0f * field; }
+};
+
+static CalcRow calc_row(const kin::Analysis& a, const std::string& xUnit, const std::string& yUnit) {
+    const auto& def = kin::model_def(a.model());
+    const bool arrhenius = def.family == kin::Family::Arrhenius;
+    auto label = [&](std::string_view name, const std::string& unit) {
+        return std::string(name) + (unit.empty() || arrhenius ? std::string() : " (" + unit + ")");
+    };
+    const float fs = ImGui::GetFontSize(), sp = ImGui::GetStyle().ItemSpacing.x;
+    CalcRow r;
+    r.xLabel = label(def.xName, xUnit);
+    r.yLabel = label(def.yName, yUnit);
+    r.labels = ImGui::CalcTextSize(r.xLabel.c_str()).x + ImGui::CalcTextSize(r.yLabel.c_str()).x + 2.0f * sp;
+    r.arrow = fs * 2.4f;
+    r.field = fs * 5.0f;
+    return r;
+}
+
+float App::prediction_box_width(const kin::Analysis& a) const {
+    const float fs = ImGui::GetFontSize();
+    return std::max(calc_row(a, xUnit_, yUnit_).width(), fs * 12.0f) + 2.0f * ImGui::GetStyle().WindowPadding.x;
 }
 
 void App::draw_prediction_box(const kin::Analysis& a, float width) {
     const auto& def = kin::model_def(a.model());
-    const bool arrhenius = def.family == kin::Family::Arrhenius;
-    const std::string xShort(def.xName), yShort(def.yName);
-    const std::string xu = xUnit_.empty() || arrhenius ? std::string() : " " + xUnit_;
-    const std::string yu = yUnit_.empty() || arrhenius ? std::string() : " " + yUnit_;
+    const std::string xName(def.xName), yName(def.yName);
     const float fs = ImGui::GetFontSize();
-    const auto points = prediction_points(a);
+    const CalcRow row = calc_row(a, xUnit_, yUnit_);
+    const auto pt = calculated_point(a);
+    double typedValue = 0.0;
+    const CellState state = parse_cell(calcInput_, typedValue);
 
     // A lightly tinted, rounded box, so that it reads as a tool of its own.
     const ImVec4 tint = palette().accent;
@@ -790,73 +849,91 @@ void App::draw_prediction_box(const kin::Analysis& a, float width) {
         ImGui::PopFont();
         help_link(HelpId::StandardCurve);
 
-        // Two rows: X read off the curve for an entered Y, and Y for an
-        // entered X. Each answer is marked on the graph by a cross of its
-        // colour.
-        const std::string labels[2] = {xShort + " for " + yShort + " =", yShort + " for " + xShort + " ="};
-        const float labelW = std::max(ImGui::CalcTextSize(labels[0].c_str()).x, ImGui::CalcTextSize(labels[1].c_str()).x) +
-                             ImGui::GetStyle().ItemSpacing.x;
-        for (int i = 0; i < 2; ++i) {
-            const bool xFromY = i == 0;
-            std::string& input = xFromY ? predictFromY_ : predictFromX_;
-            const std::string& inName = xFromY ? yShort : xShort;
-            const std::string& outName = xFromY ? xShort : yShort;
-            const double lo = xFromY ? a.yMin : a.xMin, hi = xFromY ? a.yMax : a.xMax;
-            ImGui::PushID(i);
-            const float x0 = ImGui::GetCursorPosX();
+        // Two fields, X and Y, like a unit converter: type in either, and the
+        // other shows the value read off the fitted curve, in the colour of
+        // the cross that marks the point on the graph. The arrow points from
+        // the value typed to the one calculated.
+        const float field = std::clamp((ImGui::GetContentRegionAvail().x - row.labels - row.arrow) / 2.0f, fs * 3.0f,
+                                       row.field);
+        auto draw_field = [&](bool isX) {
+            const std::string& label = isX ? row.xLabel : row.yLabel;
+            const std::string& name = isX ? xName : yName;
+            const std::string& other = isX ? yName : xName;
+            const bool typed = !calcInput_.empty() && calcInputIsX_ == isX;
+            const bool answer = !typed && pt.has_value();
+            const double value = answer ? (isX ? pt->first : pt->second) : NAN;
+            std::string text = typed ? calcInput_ : answer ? kin::fmt_g(value, 4) : std::string();
+            ImGui::PushID(isX ? "x" : "y");
             ImGui::AlignTextToFramePadding();
-            ImGui::TextUnformatted(labels[i].c_str());
-            ImGui::SameLine(x0 + labelW);
-            if (std::exchange(xFromY ? focusStdX_ : focusStdY_, false)) ImGui::SetKeyboardFocusHere();
-            ImGui::SetNextItemWidth(fs * 5.5f);
-            ImGui::InputTextWithHint("##in", inName.c_str(), &input, ImGuiInputTextFlags_CharsScientific);
-            item_tooltip("Enter " + inName + " to read " + outName + " off the fitted curve (" +
-                         (xFromY ? "Alt+X" : "Alt+Y") + "). The data's " + inName + " runs from " + kin::fmt_g(lo) +
-                         " to " + kin::fmt_g(hi) + ".");
-
-            double in = 0.0;
-            const CellState state = parse_cell(input, in);
-            if (state != CellState::Blank) {
-                std::string text, tip;
-                ImVec4 col = palette().bad;
-                const bool ok = state == CellState::Number && points[static_cast<size_t>(i)];
-                if (state == CellState::Invalid) {
-                    text = "not a number";
-                } else if (!ok) {
-                    text = "cannot be calculated";
-                    tip = "The fitted curve does not reach this " + inName + ".";
-                } else {
-                    const auto& pt = *points[static_cast<size_t>(i)];
-                    const double out = xFromY ? pt.first : pt.second;
-                    text = outName + " = " + kin::fmt_g(out, 4) + (xFromY ? xu : yu);
-                    tip = outName + " = " + kin::fmt_g(out, 10);
-                    col = prediction_colour(i);
-                    if (in < lo || in > hi) {
-                        text += " (extrapolated)";
-                        tip = "Outside the range of the data, so read off the curve beyond it. " + tip;
-                    }
-                }
-                const float crossW = ok ? fs * 0.9f : 0.0f;
-                same_line_if_fits(crossW + ImGui::CalcTextSize(text.c_str()).x);
-                if (ok) {
-                    // The same cross as on the graph links the two.
-                    const ImVec2 p = ImGui::GetCursorScreenPos();
-                    const float h = ImGui::GetFrameHeight();
-                    const float r = fs * 0.22f;
-                    const ImVec2 c(p.x + crossW * 0.4f, p.y + h * 0.5f);
-                    const ImU32 ink = ImGui::GetColorU32(col);
-                    ImDrawList* dl = ImGui::GetWindowDrawList();
-                    dl->AddLine(ImVec2(c.x - r, c.y - r), ImVec2(c.x + r, c.y + r), ink, 2.0f);
-                    dl->AddLine(ImVec2(c.x - r, c.y + r), ImVec2(c.x + r, c.y - r), ink, 2.0f);
-                    ImGui::Dummy(ImVec2(crossW, h));
-                    ImGui::SameLine(0.0f, 0.0f);
-                }
-                ImGui::AlignTextToFramePadding();
-                ImGui::TextColored(col, "%s", text.c_str());
-                if (!tip.empty()) item_tooltip(tip);
+            ImGui::TextUnformatted(label.c_str());
+            ImGui::SameLine();
+            if (std::exchange(isX ? focusCalcX_ : focusCalcY_, false)) ImGui::SetKeyboardFocusHere();
+            ImGui::SetNextItemWidth(field);
+            if (answer) ImGui::PushStyleColor(ImGuiCol_Text, prediction_colour());
+            if (ImGui::InputText("##value", &text, ImGuiInputTextFlags_CharsScientific)) {
+                calcInput_ = text;
+                calcInputIsX_ = isX;
             }
+            if (answer) ImGui::PopStyleColor();
+            item_tooltip((answer ? name + " = " + kin::fmt_g(value, 10) + ", read off the fitted curve. " : std::string()) +
+                         "Type " + name + " here to read " + other + " off the curve (" + (isX ? "Alt+Y" : "Alt+X") +
+                         "). The data's " + name + " runs from " + kin::fmt_g(isX ? a.xMin : a.yMin) + " to " +
+                         kin::fmt_g(isX ? a.xMax : a.yMax) + ".");
             ImGui::PopID();
+        };
+
+        // The arrow: from the field typed in to the other, or both ways
+        // before anything is typed.
+        auto draw_arrow = [&]() {
+            const int dir = calcInput_.empty() ? 0 : calcInputIsX_ ? 1 : -1;
+            const ImVec2 p = ImGui::GetCursorScreenPos();
+            const float h = ImGui::GetFrameHeight();
+            const float cy = std::round(p.y + h * 0.5f) + 0.5f;
+            const float x0 = p.x + fs * 0.55f, x1 = p.x + row.arrow - fs * 0.55f, head = fs * 0.3f;
+            const ImU32 ink = ImGui::GetColorU32(dir == 0 ? palette().textDim : palette().text);
+            const float thick = std::max(1.0f, fs * 0.09f);
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            dl->AddLine(ImVec2(x0, cy), ImVec2(x1, cy), ink, thick);
+            if (dir >= 0) {
+                dl->AddLine(ImVec2(x1 - head, cy - head), ImVec2(x1, cy), ink, thick);
+                dl->AddLine(ImVec2(x1 - head, cy + head), ImVec2(x1, cy), ink, thick);
+            }
+            if (dir <= 0) {
+                dl->AddLine(ImVec2(x0 + head, cy - head), ImVec2(x0, cy), ink, thick);
+                dl->AddLine(ImVec2(x0 + head, cy + head), ImVec2(x0, cy), ink, thick);
+            }
+            ImGui::Dummy(ImVec2(row.arrow, h));
+        };
+
+        draw_field(true);
+        ImGui::SameLine(0.0f, 0.0f);
+        draw_arrow();
+        ImGui::SameLine(0.0f, 0.0f);
+        draw_field(false);
+
+        // One line under the fields, always there so that the box keeps its
+        // height: what to do, what went wrong, or what the answer is.
+        const std::string& typedName = calcInputIsX_ ? xName : yName;
+        const double lo = calcInputIsX_ ? a.xMin : a.yMin, hi = calcInputIsX_ ? a.xMax : a.yMax;
+        std::string note;
+        ImVec4 col = palette().textDim;
+        if (state == CellState::Blank) {
+            note = "Type in either field to read the other off the fitted curve.";
+        } else if (state == CellState::Invalid) {
+            note = "Not a number.";
+            col = palette().bad;
+        } else if (!pt) {
+            note = "The fitted curve does not reach " + typedName + " = " + calcInput_ + ".";
+            col = palette().bad;
+        } else if (typedValue < lo || typedValue > hi) {
+            note = "Extrapolated: the data's " + typedName + " runs from " + kin::fmt_g(lo) + " to " + kin::fmt_g(hi) + ".";
+            col = palette().warning;
+        } else {
+            note = "Read off the fitted curve, and marked on the graph by a cross.";
         }
+        ImGui::PushStyleColor(ImGuiCol_Text, col);
+        ImGui::TextWrapped("%s", note.c_str());
+        ImGui::PopStyleColor();
     }
     ImGui::EndChild();
 }

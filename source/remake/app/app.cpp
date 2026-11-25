@@ -6,6 +6,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <memory>
 #include <utility>
 
 #include "app/help_text.hpp"
@@ -322,8 +323,7 @@ void App::open_example(Example e) {
     switch (e) {
     case Example::MichaelisMenten: table(kin::ModelId::MichaelisMenten, ex / "michaelis_menten.csv"); break;
     case Example::Arrhenius: table(kin::ModelId::Arrhenius, ex / "arrhenius.csv"); break;
-    case Example::SpreadsheetRuns: import_runs_file(ex / "spreadsheet_runs.txt", true, kin::ModelId::HillGt0); break;
-    case Example::RunsInColumns: import_runs_file(ex / "runs_in_columns.csv", true, kin::ModelId::HillGt0); break;
+    case Example::HillRuns: import_runs_file(ex / "runs_in_columns.csv", true, kin::ModelId::HillGt0); break;
     }
 }
 
@@ -511,6 +511,40 @@ void App::delete_run(int k) {
     notice_ = std::move(n);
 }
 
+void App::clear_all_runs() {
+    commit_run();
+    const size_t count = runs_.size();
+    // Everything the runs bring with them, for Undo.
+    struct Saved {
+        std::vector<Run> runs;
+        int shown;
+        std::filesystem::path file;
+        std::string text;
+        bool table, inRows, asImported;
+        std::string calcInput;
+        bool calcInputIsX;
+    };
+    auto before = std::make_shared<Saved>(Saved{runs_, current_, runsFile_, runsText_, runsTable_, runsInRows_,
+                                                runsAsImported_, calcInput_, calcInputIsX_});
+    replace_runs({});
+    requestedTab_ = Tab::Runs;
+    Notice n;
+    n.text = "Cleared " + std::string(count == 1 ? "the run" : "all " + std::to_string(count) + " runs") + ".";
+    n.undoTooltip = count == 1 ? "Put the run back" : "Put the runs back";
+    n.undo = [this, before]() {
+        runs_ = before->runs;
+        runsFile_ = before->file;
+        runsText_ = before->text;
+        runsTable_ = before->table;
+        runsInRows_ = before->inRows;
+        runsAsImported_ = before->asImported;
+        calcInput_ = before->calcInput;
+        calcInputIsX_ = before->calcInputIsX;
+        load_run(before->shown);
+    };
+    notice_ = std::move(n);  // after replace_runs, which dismisses messages
+}
+
 void App::fit_run(int k) {
     select_run(k);
     request_fit();
@@ -610,8 +644,7 @@ void App::replace_runs(std::vector<Run> runs) {
     runsAsImported_ = false;
     notice_.reset();
     dataOpen_ = true;
-    predictFromX_.clear();
-    predictFromY_.clear();
+    calcInput_.clear();
 }
 
 void App::confirm_replace(const std::string& what, std::function<void()> action) {

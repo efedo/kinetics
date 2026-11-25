@@ -77,10 +77,11 @@ public:
     // help | about | report-options | fit-options | graph | residuals
     void show_window(const std::string& name);
     void select_tab(Tab t) { requestedTab_ = t; }
-    // The Calculate box's inputs: a Y to read X for, and an X to read Y for.
-    void set_predictions(const std::string& forY, const std::string& forX) {
-        predictFromY_ = forY;
-        predictFromX_ = forX;
+    // The Calculate box: a value typed into its X field (isX) or its Y field;
+    // the other field shows the value read off the fitted curve.
+    void set_calculation(const std::string& value, bool isX) {
+        calcInput_ = value;
+        calcInputIsX_ = isX;
     }
     void set_plot_type(kin::PlotType t);
     // View > Text size: a percentage of the normal size, clamped to kTextScales.
@@ -130,6 +131,7 @@ private:
     void select_run(int k);
     void add_run();
     void delete_run(int k);
+    void clear_all_runs();  // one empty run in their place, with Undo
     void fit_run(int k);
     // "Run 2", or "Run 2: WT" when the run has a name of its own.
     std::string run_label(int k) const;
@@ -185,7 +187,7 @@ private:
             openReportOptions_ = true;
         }
     }
-    enum class Example { MichaelisMenten, Arrhenius, SpreadsheetRuns, RunsInColumns };
+    enum class Example { MichaelisMenten, Arrhenius, HillRuns };
     void open_example(Example e);
     // Whether all the fit settings (Fitting options) are at their defaults.
     bool fit_settings_are_default() const;
@@ -253,11 +255,12 @@ private:
     void draw_plot(const ImVec2& size);
     // The exact values of results data point i, in a tooltip.
     void point_tooltip(const kin::Analysis& a, int i);
-    // Predictions from the fitted curve (formerly the Standard curve tab).
+    // Values read off the fitted curve (formerly the Standard curve tab).
     void draw_prediction_box(const kin::Analysis& a, float width);
-    // The Calculate box's answers as points on the curve, in the data's
-    // units: [0] the X read off for the entered Y, [1] the Y for the entered X.
-    std::array<std::optional<std::pair<double, double>>, 2> prediction_points(const kin::Analysis& a) const;
+    float prediction_box_width(const kin::Analysis& a) const;
+    // The Calculate box's point on the curve, (X, Y) in the data's units: the
+    // value typed and the one read off for it. None until one is typed.
+    std::optional<std::pair<double, double>> calculated_point(const kin::Analysis& a) const;
     void draw_runs_tab();
     void draw_report_tab();
 
@@ -335,9 +338,10 @@ private:
     ImportState import_;  // the classic interface's imported file
     BatchState batch_;    // and its results
     ReportState report_;
-    // The Calculate box's inputs, as typed: a Y to read X off the curve
-    // for, and an X to read Y for. Blank for none.
-    std::string predictFromY_, predictFromX_;
+    // The Calculate box's value, as typed into its X field (calcInputIsX_)
+    // or its Y field. Blank for none.
+    std::string calcInput_;
+    bool calcInputIsX_ = true;
     // The data point under the mouse on the graph (an index into the
     // results' data), highlighted in the table on the next frame.
     int hoveredPoint_ = -1;
@@ -373,8 +377,8 @@ private:
     PendingReport pendingReport_ = PendingReport::None;
     bool focusModel_ = false;
     bool focusTable_ = false;
-    bool focusStdX_ = false;  // Calculate box: X for a given Y
-    bool focusStdY_ = false;  // Calculate box: Y for a given X
+    bool focusCalcX_ = false;  // Calculate box: the cursor to its X field
+    bool focusCalcY_ = false;  // and to its Y field
     bool quit_ = false;
     bool classicRequested_ = false;
 };

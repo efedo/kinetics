@@ -10,7 +10,7 @@ Kinetics is available **on the desktop** and **on the web via WebAssembly**, bot
 
 The original was written in 16-bit Borland C++. This version uses **SDL3** for the window and **Dear ImGui + ImPlot** for the interface and graphs. Built natively it is a Windows (or other desktop) program; built with Emscripten it is a **WebAssembly** page that runs in a browser.
 
-![Kinetics after a Michaelis-Menten fit: the verdict, the parameters with their standard deviations, the Calculate box, and the graph with its crosses for the calculated values and a strip of residuals](docs/screenshot.png)
+![Kinetics after a Michaelis-Menten fit: the verdict, the parameters with their standard deviations, the Calculate box, and the graph with a cross for the calculated value and a strip of residuals](docs/screenshot.png)
 
 ## What it does
 
@@ -23,7 +23,7 @@ The original was written in 16-bit Borland C++. This version uses **SDL3** for t
   - linear regression
 - **Reports each parameter with its standard deviation and tests the fit.** The residuals get a runs test and a sign test, any beyond 2 SD are flagged, and slopes and Hill coefficients are tested.
 - **Plots the data and fitted curve ten ways:** normal, double-reciprocal (Lineweaver–Burk), Hanes–Woolf, Eadie–Hofstee, Hill, log-log, saturation, Job plot, Arrhenius and residuals.
-- **Uses the fitted curve as a standard curve**, reading off X for a measured Y or Y for a given X in the Calculate box, with each answer marked on the graph.
+- **Uses the fitted curve as a standard curve**, reading off X for a measured Y or Y for a given X in the Calculate box, with the answer marked on the graph.
 - **Fits files of many runs** saved from a spreadsheet (a table with a run in each column or row, or v3.51's print-to-file format), one run at a time or all at once. MPA microplate files are read by the classic interface.
 - **Writes reports** in three lengths, as plain text or comma-separated for spreadsheets.
 
@@ -45,11 +45,11 @@ The strip under the menus shows the six steps (Run, Data, Equation, Fit, Results
 To use the original 1992 interface instead, choose View > Classic interface or press Ctrl+F12 (see [Classic interface](#classic-interface)).
 
 <p>
-  <img src="docs/screenshot-double-reciprocal.png" width="49%" alt="The same Michaelis-Menten fit and predictions on a double-reciprocal plot, dark theme">
+  <img src="docs/screenshot-double-reciprocal.png" width="49%" alt="The same Michaelis-Menten fit and calculated point on a double-reciprocal plot, dark theme">
   <img src="docs/screenshot-file-runs.png" width="49%" alt="Four runs from a table with a run in each column, fitted with the Hill equation, on the Runs tab">
 </p>
 
-*Left: the same fit and predictions on a double-reciprocal (Lineweaver–Burk) plot, in the dark theme. Right: four runs imported from a table with a run in each column and fitted with the Hill equation, on the Runs tab; the top of the Data section names the run shown.*
+*Left: the same fit and calculated point on a double-reciprocal (Lineweaver–Burk) plot, in the dark theme. Right: four runs imported from a table with a run in each column and fitted with the Hill equation, on the Runs tab; the top of the Data section names the run shown.*
 
 ## Classic interface
 
@@ -148,10 +148,10 @@ The window keeps the original menu structure (File, Edit, Calculate, View, Help)
 
 - **Step strip:** under the menus, the six steps (Run, Data, Equation, Fit, Results, Report) with the state of each: done, out of date, or needing a look. Click a step to go to its section or tab; a click never fits or writes anything.
 - **Left panel:** three sections in the order of the steps, each folded or unfolded by a click on its heading. **Data** holds the run shown (a list of the runs, arrows to step through them and a + to add one) and its data table; **Equation** the equation list and its formula; **Fitting options** the fit settings (the parameter table with its Fixed check boxes, values and optional bounds; the minimization method; initial estimates; the iteration limit) and, below them, the Fit (F5) button. Opening or pasting a table, or importing a file, opens the Data section. The equation list is grouped by purpose (substrate saturation, activators, inhibitors, other), with a line on when to use each and the one to start with marked; v3.51's letters a to k still choose an equation while it is open. The fit settings start folded, and open by themselves when a setting differs from the default or a fit does not converge; the Fit button stays in view when they are folded. Type in the last row of the data table to add points, right-click a row number to insert or delete a row, or paste two columns from a spreadsheet. The row under the headings takes optional units. Drag the line between the panels to widen either; the width is remembered.
-- **Right panel:** a getting-started page until there is something to show, then tabs: Runs, Results, and Report once there are results. Results shows a getting-started page until the run shown is fitted. The Results tab rounds each value to the precision of its standard deviation (Km = 2.71 ± 0.14) and shows all the digits in a tooltip; reports keep every digit. On a wide window the parameters sit beside the graph. The Calculate box beside or under them reads X for a given Y, or Y for a given X, off the fitted curve (formerly the Standard curve tab). When the data change, the results are cleared at once; when the equation or fit settings change, they are greyed out under a note until you fit again.
+- **Right panel:** a getting-started page until there is something to show, then tabs: Runs, Results, and Report once there are results. Results shows a getting-started page until the run shown is fitted. The Results tab rounds each value to the precision of its standard deviation (Km = 2.71 ± 0.14) and shows all the digits in a tooltip; reports keep every digit. On a wide window the parameters sit beside the graph. The Calculate box beside or under them reads values off the fitted curve (formerly the Standard curve tab): like a unit converter, it has a field for X and one for Y, and typing in either fills in the other. When the data change, the results are cleared at once; when the equation or fit settings change, they are greyed out under a note until you fit again.
 - **Verdict:** the Results tab opens with a coloured verdict: green when every constant is determined to within 10%, amber or red for a parameter that is poorly determined, held at one of its bounds, or extrapolated beyond the data, for residuals with a pattern, or for a fit that did not converge, each with what would help. The Runs tab gives it in a word per run. Reports keep v3.51's text.
-- **Graph:** the plot list puts Normal and Residuals first and the linear transforms after them; the Display list holds the options that apply to the plot shown. The graph is at least a third as high as it is wide, and the residual strip a quarter (the tab scrolls if need be). Holding the mouse over a point shows its values and highlights its row in the data table; a cross of the matching colour marks each prediction.
-- **Runs tab:** every run of the analysis with its points, verdict and constants. Fit all runs (Alt+A) fits them all; Fit (F5) fits the run shown. Click a run to show it; right-click it to fit it alone, rename it or delete it (with Undo). + Add run adds an empty run. Just after an import, the tab can read the file again with its runs in rows, or with negative values kept.
+- **Graph:** the plot list puts Normal and Residuals first and the linear transforms after them; the Display list holds the options that apply to the plot shown. The graph is at least a third as high as it is wide, and the residual strip a quarter (the tab scrolls if need be). Holding the mouse over a point shows its values and highlights its row in the data table; an orange cross marks the Calculate box's point.
+- **Runs tab:** every run of the analysis with its points, verdict and constants. Fit all runs (Alt+A) fits them all; Fit (F5) fits the run shown. Click a run to show it; right-click it to fit it alone, rename it or delete it (with Undo). + Add run adds an empty run, and Clear all runs leaves one empty run in their place (with Undo). Just after an import, the tab can read the file again with its runs in rows, or with negative values kept.
 - **Files:** File > New, Open and Save analysis (Ctrl+N, Ctrl+O, Ctrl+S) work on `.kinetics` files: the runs, equation, fitting options and units as text; opening one fits again the runs that had results. File > Import spreadsheet of runs replaces the runs, and Export runs to CSV writes them all to a CSV file, a run in each column. Replacing the runs asks first when there is data, as it cannot be undone. The run shown's own data is read from and saved to a two-column table with the Data section's Open and Save, or Edit > Read data from a file and Save data to a file.
 - **Report tab:** the report of every fitted run, with Write report, Copy to clipboard, the Report options (Alt+O) and a preview. Units given under the table's headings appear in reports; without them, reports keep v3.51's text exactly.
 - **Status bar and messages:** the bar at the bottom names the data. Errors and confirmations appear there instead of in a dialog. Clear empties the table, and the bar offers Undo.
@@ -170,14 +170,14 @@ The window keeps the original menu structure (File, Edit, Calculate, View, Help)
 | | | Alt+Q | Quit (desktop) |
 | Ctrl+= / Ctrl+- | Larger / smaller text | Ctrl+0 | Normal text size |
 
-**Example data** is in [`examples/`](examples/), and can also be opened from File > Open example:
+**Example data** is in [`examples/`](examples/); File > Open example opens its three tables:
 
 | File | Contents |
 |---|---|
 | `michaelis_menten.csv` | Michaelis–Menten data table |
 | `arrhenius.csv` | Arrhenius data table |
-| `spreadsheet_runs.txt` | Spreadsheet file with four runs for the Hill equation, one with a missing value |
-| `runs_in_columns.csv` | The same four runs as a table with a run in each column, as a spreadsheet saves it |
+| `runs_in_columns.csv` | Four runs for the Hill equation, one with a missing value, as a table with a run in each column, as a spreadsheet saves it |
+| `spreadsheet_runs.txt` | The same four runs in v3.51's spreadsheet print-to-file format |
 | `mpa_plate.txt` | MPA file with two inhibition datasets, for the classic interface; it needs the [I] values 0, 0.5, 1, 2, 4, 8, 16, 32 in the table |
 
 **File formats.**
@@ -204,7 +204,7 @@ Kinetics --model b --import examples/spreadsheet_runs.txt --analyse-all --report
 - `--theme system|dark|light`: colour theme (also under View > Theme; by default the same as the system)
 - `--style default|soft|slate|paper|flat`: the look (also under View > Style)
 - `--text-size <80-150>`: text size in percent (also under View > Text size; 100 by default)
-- `--predict-x <y>`, `--predict-y <x>`: fill the Calculate box: read X off the curve for this Y, or Y for this X
+- `--predict-x <y>`, `--predict-y <x>`: fill the Calculate box: type this Y to read X off the curve, or this X to read Y (one at a time; `--predict-y` wins)
 - `--classic`: start in the classic interface; `--classic-keys "alt+g,n"` also types those keys into it (for screenshots: text and key names such as `enter`, `esc`, `up`, `f1`, `alt+x`)
 - `--size <W>x<H>`: window size
 - `--screenshot <file.bmp>`: render off-screen, save the image and exit

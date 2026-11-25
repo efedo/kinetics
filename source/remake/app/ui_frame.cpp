@@ -410,8 +410,8 @@ void App::draw_menu_bar() {
         if (ImGui::BeginMenu("Open example")) {
             if (ImGui::MenuItem("Michaelis-Menten data table")) open_example(Example::MichaelisMenten);
             if (ImGui::MenuItem("Arrhenius data table")) open_example(Example::Arrhenius);
-            if (ImGui::MenuItem("Table with a run in each column (Hill)")) open_example(Example::RunsInColumns);
-            if (ImGui::MenuItem("Spreadsheet print file with four runs (Hill)")) open_example(Example::SpreadsheetRuns);
+            if (ImGui::MenuItem("Hill data table with four runs")) open_example(Example::HillRuns);
+            ImGui::SetItemTooltip("A table with a run in each column, as a spreadsheet saves it");
             ImGui::EndMenu();
         }
         ImGui::Separator();
@@ -459,13 +459,15 @@ void App::draw_menu_bar() {
         }
         if (ImGui::MenuItem("Show the runs", "Alt+W")) requestedTab_ = Tab::Runs;
         ImGui::Separator();
+        // To find X, type a Y: each puts the cursor in the Calculate box's
+        // field for the value given.
         if (ImGui::MenuItem(("Find " + xName + " for a given " + yName + "...").c_str(), "Alt+X", false, haveFit)) {
             requestedTab_ = Tab::Results;
-            focusStdX_ = true;
+            focusCalcY_ = true;
         }
         if (ImGui::MenuItem(("Find " + yName + " for a given " + xName + "...").c_str(), "Alt+Y", false, haveFit)) {
             requestedTab_ = Tab::Results;
-            focusStdY_ = true;
+            focusCalcX_ = true;
         }
         ImGui::Separator();
         ImGui::TextDisabled("Initial estimates");
@@ -561,11 +563,11 @@ void App::handle_shortcuts() {
     if (Shortcut(ImGuiMod_Alt | ImGuiKey_W, g)) requestedTab_ = Tab::Runs;
     if (Shortcut(ImGuiMod_Alt | ImGuiKey_X, g)) {
         requestedTab_ = Tab::Results;
-        focusStdX_ = true;
+        focusCalcY_ = true;
     }
     if (Shortcut(ImGuiMod_Alt | ImGuiKey_Y, g)) {
         requestedTab_ = Tab::Results;
-        focusStdY_ = true;
+        focusCalcX_ = true;
     }
     if (Shortcut(ImGuiMod_Alt | ImGuiKey_L, g)) requestedTab_ = Tab::Results;
     if (Shortcut(ImGuiMod_Alt | ImGuiKey_G, g)) show_window("graph");

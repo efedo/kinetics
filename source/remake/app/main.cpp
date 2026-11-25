@@ -18,8 +18,9 @@
 //   --theme <name>            system (default) | dark | light
 //   --style <name>            default | soft | slate | paper | flat (the original look)
 //   --text-size <percent>     text size, 80 to 150 (default 100)
-//   --predict-x <y>           Calculate box: read X off the curve for this Y
-//   --predict-y <x>           Calculate box: read Y off the curve for this X
+//   --predict-x <y>           Calculate box: type this Y, to read X off the curve
+//   --predict-y <x>           Calculate box: type this X, to read Y off the curve
+//                             (the box takes one value: --predict-y wins)
 //   --classic                 start in the classic (v3.51) interface
 //   --classic-keys <keys>     start in the classic interface and type these keys,
 //                             e.g. "alt+t,a,enter" (see classic::Host::inject_keys)
@@ -423,7 +424,8 @@ int main(int argc, char** argv) {
     if (auto st = app::style_from_name(o.style)) app::set_style(*st);
     if (auto t = app::theme_from_name(o.theme)) app::set_theme(*t);
     if (o.textSize > 0) c.app.set_text_scale(o.textSize);
-    if (!o.predictX.empty() || !o.predictY.empty()) c.app.set_predictions(o.predictX, o.predictY);
+    if (!o.predictX.empty()) c.app.set_calculation(o.predictX, false);
+    if (!o.predictY.empty()) c.app.set_calculation(o.predictY, true);
     if (o.classic || !o.classicKeys.empty()) {
         enter_classic(c);
         if (!o.classicKeys.empty()) c.classicHost.inject_keys(o.classicKeys);

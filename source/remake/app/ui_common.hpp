@@ -93,11 +93,9 @@ inline bool begin_combo(const char* id, const char* preview, ImGuiComboFlags fla
     return open;
 }
 
-// The colours of the Calculate box's two answers and of their crosses on
-// the graph: orange and purple, which read on both themes.
-inline ImVec4 prediction_colour(int i) {
-    return i == 0 ? ImVec4(0.93f, 0.49f, 0.13f, 1.0f) : ImVec4(0.70f, 0.38f, 0.90f, 1.0f);
-}
+// The colour of the Calculate box's answer and of its cross on the graph:
+// an orange that reads on both themes.
+inline ImVec4 prediction_colour() { return ImVec4(0.93f, 0.49f, 0.13f, 1.0f); }
 
 // Text in a larger size of the heading (or the current) font.
 inline void push_heading_font(float scale = 1.12f) {
