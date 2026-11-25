@@ -479,7 +479,7 @@ void App::draw_results_tab() {
         ImGui::EndGroup();
     } else {
         draw_results_summary(a, avail.x >= fs * 40.0f);
-        ImGui::Spacing();
+        ImGui::Dummy(ImVec2(0.0f, fs * 0.6f));  // the summary's gap between groups
         if (std::exchange(scrollToPlot_, false)) ImGui::SetScrollHereY(0.0f);
         draw_plot_controls();
         const float w = ImGui::GetContentRegionAvail().x;
@@ -495,9 +495,11 @@ void App::draw_results_tab() {
 void App::draw_results_summary(const kin::Analysis& a, bool twoColumns) {
     // The verdict first, then the numbers, then how the fit went: beside the
     // numbers when there is room, which leaves more height for the graph.
-    for (const auto& v : fit_verdict(a)) draw_verdict(v);
-    ImGui::Spacing();
+    // The groups are set apart by the same gap throughout.
     const float fs = ImGui::GetFontSize();
+    const float vgap = fs * 0.6f;
+    for (const auto& v : fit_verdict(a)) draw_verdict(v);
+    ImGui::Dummy(ImVec2(0.0f, vgap * 0.5f));
     const float gap = fs * 1.5f;
     const float boxW = prediction_box_width(a);  // the Calculate box
     if (twoColumns) {
@@ -506,44 +508,53 @@ void App::draw_results_summary(const kin::Analysis& a, bool twoColumns) {
         ImGui::EndGroup();
         ImGui::SameLine(0.0f, gap);
         // The notes, and the Calculate box beside them when there is room
-        // for both; otherwise the box goes below.
+        // for both; otherwise under them, in their column.
         const float notesW = ImGui::GetContentRegionAvail().x;
         const bool boxBeside = notesW >= fs * 14.0f + gap + boxW;
         ImGui::BeginGroup();
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + (boxBeside ? notesW - gap - boxW : notesW));
         draw_result_notes(a);
         ImGui::PopTextWrapPos();
+        if (!boxBeside) {
+            ImGui::Dummy(ImVec2(0.0f, vgap));
+            draw_prediction_box(a, std::min(boxW, notesW));
+        }
         ImGui::EndGroup();
         if (boxBeside) {
             same_line_right(boxW);
             draw_prediction_box(a, boxW);
-        } else {
-            ImGui::Spacing();
-            draw_prediction_box(a, std::min(boxW, ImGui::GetContentRegionAvail().x));
         }
         return;
     }
     draw_parameter_values(a);
-    ImGui::Spacing();
+    ImGui::Dummy(ImVec2(0.0f, vgap));
     draw_result_notes(a);
-    ImGui::Spacing();
+    ImGui::Dummy(ImVec2(0.0f, vgap));
     draw_prediction_box(a, std::min(boxW, ImGui::GetContentRegionAvail().x));
 }
 
 void App::draw_result_notes(const kin::Analysis& a) {
-    for (const auto& line : plain_interpretation(a)) {
-        if (line.warn) ImGui::PushStyleColor(ImGuiCol_Text, palette().warning);
-        ImGui::Bullet();
-        ImGui::TextWrapped("%s", line.text.c_str());
-        if (line.warn) ImGui::PopStyleColor();
-    }
+    // Each note with a small, quiet bullet in the verdict's dot column, and
+    // its text in the verdict's text column.
+    const float fs = ImGui::GetFontSize();
+    bool bullets = false;
+    auto note = [&](const std::string& text, bool warn) {
+        bullets = true;
+        const ImVec2 p = ImGui::GetCursorScreenPos();
+        ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(p.x + fs * 0.35f, p.y + ImGui::GetTextLineHeight() * 0.55f),
+                                                    fs * 0.12f, ImGui::GetColorU32(palette().textDim));
+        ImGui::Indent(fs);
+        ImGui::PushStyleColor(ImGuiCol_Text, warn ? palette().warning : palette().text);
+        ImGui::TextWrapped("%s", text.c_str());
+        ImGui::PopStyleColor();
+        ImGui::Unindent(fs);
+    };
+    for (const auto& line : plain_interpretation(a)) note(line.text, line.warn);
     // The notes the verdict above does not already cover (e.g. how a fixed
     // v0 was set); the report lists them all.
-    for (const auto& note : a.notes) {
-        if (note == a.fit.message || note.rfind("Only ", 0) == 0 || note.rfind("Some standard deviations", 0) == 0)
-            continue;
-        ImGui::Bullet();
-        ImGui::TextWrapped("%s", note.c_str());
+    for (const auto& n : a.notes) {
+        if (n == a.fit.message || n.rfind("Only ", 0) == 0 || n.rfind("Some standard deviations", 0) == 0) continue;
+        note(n, false);
     }
     {
         const std::string sd = kin::fmt_g(a.fit.stdDev, 3);
@@ -561,9 +572,13 @@ void App::draw_result_notes(const kin::Analysis& a) {
             std::snprintf(buf, sizeof buf, "%s. %s %d iteration%s (%s), %d points. Residual SD %s%s.", label.c_str(),
                           a.fit.status == kin::FitStatus::Converged ? "Converged after" : "Stopped after", it,
                           it == 1 ? "" : "s", method, a.fit.n, sd.c_str(), unit.c_str());
+        // In the notes' text column, or at the left when there are none.
+        const float indent = bullets ? fs : 0.0f;
+        if (bullets) ImGui::Indent(indent);
         ImGui::PushStyleColor(ImGuiCol_Text, palette().textDim);
         ImGui::TextWrapped("%s", buf);
         ImGui::PopStyleColor();
+        if (bullets) ImGui::Unindent(indent);
         const int df = a.linear ? a.linear->df : a.fit.dof;
         item_tooltip("The residual SD is the typical distance of a point from the fitted curve (" +
                      kin::fmt_g(a.fit.stdDev) + "). " + std::to_string(a.fit.nFree) + " free parameter" +
@@ -790,61 +805,65 @@ std::optional<std::pair<double, double>> App::calculated_point(const kin::Analys
     return std::pair{*x, v};
 }
 
-// The Calculate box's one row, "[S] [  ]  ->  v [  ]": its labels and sizes,
-// for both the box's width and its drawing.
-struct CalcRow {
+// The Calculate box's layout: two equal columns, each a label over a field,
+// with the arrow between them.
+struct CalcLayout {
     std::string xLabel, yLabel;
-    float labels = 0.0f;  // both labels, with the space after each
-    float arrow = 0.0f;   // the arrow between the fields, with its margins
-    float field = 0.0f;   // each field, at its full width
-    float width() const { return labels + arrow + 2.0f * field; }
+    float column = 0.0f;  // each column, at its full width
+    float arrow = 0.0f;   // the arrow between the columns, with its margins
+    float width() const { return 2.0f * column + arrow; }
 };
 
-static CalcRow calc_row(const kin::Analysis& a, const std::string& xUnit, const std::string& yUnit) {
+static CalcLayout calc_layout(const kin::Analysis& a, const std::string& xUnit, const std::string& yUnit) {
     const auto& def = kin::model_def(a.model());
     const bool arrhenius = def.family == kin::Family::Arrhenius;
     auto label = [&](std::string_view name, const std::string& unit) {
         return std::string(name) + (unit.empty() || arrhenius ? std::string() : " (" + unit + ")");
     };
-    const float fs = ImGui::GetFontSize(), sp = ImGui::GetStyle().ItemSpacing.x;
-    CalcRow r;
-    r.xLabel = label(def.xName, xUnit);
-    r.yLabel = label(def.yName, yUnit);
-    r.labels = ImGui::CalcTextSize(r.xLabel.c_str()).x + ImGui::CalcTextSize(r.yLabel.c_str()).x + 2.0f * sp;
-    r.arrow = fs * 2.4f;
-    r.field = fs * 5.0f;
-    return r;
+    const float fs = ImGui::GetFontSize();
+    CalcLayout l;
+    l.xLabel = label(def.xName, xUnit);
+    l.yLabel = label(def.yName, yUnit);
+    l.column = std::max({fs * 5.5f, ImGui::CalcTextSize(l.xLabel.c_str()).x, ImGui::CalcTextSize(l.yLabel.c_str()).x});
+    l.arrow = fs * 2.6f;
+    return l;
+}
+
+// The box's padding, a little tighter than a window's.
+static ImVec2 calc_padding() {
+    const float fs = ImGui::GetFontSize();
+    return ImVec2(fs * 0.8f, fs * 0.6f);
 }
 
 float App::prediction_box_width(const kin::Analysis& a) const {
     const float fs = ImGui::GetFontSize();
-    return std::max(calc_row(a, xUnit_, yUnit_).width(), fs * 12.0f) + 2.0f * ImGui::GetStyle().WindowPadding.x;
+    return std::max(calc_layout(a, xUnit_, yUnit_).width(), fs * 11.0f) + 2.0f * calc_padding().x;
 }
 
 void App::draw_prediction_box(const kin::Analysis& a, float width) {
     const auto& def = kin::model_def(a.model());
     const std::string xName(def.xName), yName(def.yName);
     const float fs = ImGui::GetFontSize();
-    const CalcRow row = calc_row(a, xUnit_, yUnit_);
+    const CalcLayout layout = calc_layout(a, xUnit_, yUnit_);
     const auto pt = calculated_point(a);
     double typedValue = 0.0;
     const CellState state = parse_cell(calcInput_, typedValue);
 
-    // A lightly tinted, rounded box, so that it reads as a tool of its own.
+    // A quiet box: a faint tint of the accent and a light border.
     const ImVec4 tint = palette().accent;
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(tint.x, tint.y, tint.z, 0.07f));
-    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(tint.x, tint.y, tint.z, 0.45f));
-    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, fs * 0.35f);
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(tint.x, tint.y, tint.z, 0.045f));
+    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(tint.x, tint.y, tint.z, 0.28f));
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, fs * 0.4f);
     ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, calc_padding());
     const bool visible = ImGui::BeginChild("##predict", ImVec2(width, 0.0f),
                                            ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY |
                                                ImGuiChildFlags_AlwaysUseWindowPadding,
                                            ImGuiWindowFlags_NoScrollbar);
-    ImGui::PopStyleVar(2);
+    ImGui::PopStyleVar(3);
     ImGui::PopStyleColor(2);
     if (visible) {
         push_heading_font();
-        ImGui::AlignTextToFramePadding();
         ImGui::TextUnformatted("Calculate");
         ImGui::PopFont();
         help_link(HelpId::StandardCurve);
@@ -853,10 +872,18 @@ void App::draw_prediction_box(const kin::Analysis& a, float width) {
         // other shows the value read off the fitted curve, in the colour of
         // the cross that marks the point on the graph. The arrow points from
         // the value typed to the one calculated.
-        const float field = std::clamp((ImGui::GetContentRegionAvail().x - row.labels - row.arrow) / 2.0f, fs * 3.0f,
-                                       row.field);
+        const float column = std::max(fs * 3.0f, (ImGui::GetContentRegionAvail().x - layout.arrow) / 2.0f);
+        const float x0 = ImGui::GetCursorPosX();
+        const float x1 = x0 + column + layout.arrow;  // the second column
+
+        // The labels, quiet like the table's headings.
+        ImGui::PushStyleColor(ImGuiCol_Text, palette().textDim);
+        ImGui::TextUnformatted(layout.xLabel.c_str());
+        ImGui::SameLine(x1);
+        ImGui::TextUnformatted(layout.yLabel.c_str());
+        ImGui::PopStyleColor();
+
         auto draw_field = [&](bool isX) {
-            const std::string& label = isX ? row.xLabel : row.yLabel;
             const std::string& name = isX ? xName : yName;
             const std::string& other = isX ? yName : xName;
             const bool typed = !calcInput_.empty() && calcInputIsX_ == isX;
@@ -864,18 +891,17 @@ void App::draw_prediction_box(const kin::Analysis& a, float width) {
             const double value = answer ? (isX ? pt->first : pt->second) : NAN;
             std::string text = typed ? calcInput_ : answer ? kin::fmt_g(value, 4) : std::string();
             ImGui::PushID(isX ? "x" : "y");
-            ImGui::AlignTextToFramePadding();
-            ImGui::TextUnformatted(label.c_str());
-            ImGui::SameLine();
             if (std::exchange(isX ? focusCalcX_ : focusCalcY_, false)) ImGui::SetKeyboardFocusHere();
-            ImGui::SetNextItemWidth(field);
+            ImGui::SetNextItemWidth(column);
             if (answer) ImGui::PushStyleColor(ImGuiCol_Text, prediction_colour());
             if (ImGui::InputText("##value", &text, ImGuiInputTextFlags_CharsScientific)) {
                 calcInput_ = text;
                 calcInputIsX_ = isX;
             }
             if (answer) ImGui::PopStyleColor();
-            item_tooltip((answer ? name + " = " + kin::fmt_g(value, 10) + ", read off the fitted curve. " : std::string()) +
+            item_tooltip((answer ? name + " = " + kin::fmt_g(value, 10) + ", read off the fitted curve and marked on "
+                                                                         "the graph by a cross. "
+                                 : std::string()) +
                          "Type " + name + " here to read " + other + " off the curve (" + (isX ? "Alt+Y" : "Alt+X") +
                          "). The data's " + name + " runs from " + kin::fmt_g(isX ? a.xMin : a.yMin) + " to " +
                          kin::fmt_g(isX ? a.xMax : a.yMax) + ".");
@@ -889,20 +915,22 @@ void App::draw_prediction_box(const kin::Analysis& a, float width) {
             const ImVec2 p = ImGui::GetCursorScreenPos();
             const float h = ImGui::GetFrameHeight();
             const float cy = std::round(p.y + h * 0.5f) + 0.5f;
-            const float x0 = p.x + fs * 0.55f, x1 = p.x + row.arrow - fs * 0.55f, head = fs * 0.3f;
+            const float half = fs * 0.65f, head = fs * 0.28f;
+            const float mid = p.x + layout.arrow * 0.5f;
+            const float a0 = mid - half, a1 = mid + half;
             const ImU32 ink = ImGui::GetColorU32(dir == 0 ? palette().textDim : palette().text);
-            const float thick = std::max(1.0f, fs * 0.09f);
+            const float thick = std::max(1.0f, fs * 0.08f);
             ImDrawList* dl = ImGui::GetWindowDrawList();
-            dl->AddLine(ImVec2(x0, cy), ImVec2(x1, cy), ink, thick);
+            dl->AddLine(ImVec2(a0, cy), ImVec2(a1, cy), ink, thick);
             if (dir >= 0) {
-                dl->AddLine(ImVec2(x1 - head, cy - head), ImVec2(x1, cy), ink, thick);
-                dl->AddLine(ImVec2(x1 - head, cy + head), ImVec2(x1, cy), ink, thick);
+                dl->AddLine(ImVec2(a1 - head, cy - head), ImVec2(a1, cy), ink, thick);
+                dl->AddLine(ImVec2(a1 - head, cy + head), ImVec2(a1, cy), ink, thick);
             }
             if (dir <= 0) {
-                dl->AddLine(ImVec2(x0 + head, cy - head), ImVec2(x0, cy), ink, thick);
-                dl->AddLine(ImVec2(x0 + head, cy + head), ImVec2(x0, cy), ink, thick);
+                dl->AddLine(ImVec2(a0 + head, cy - head), ImVec2(a0, cy), ink, thick);
+                dl->AddLine(ImVec2(a0 + head, cy + head), ImVec2(a0, cy), ink, thick);
             }
-            ImGui::Dummy(ImVec2(row.arrow, h));
+            ImGui::Dummy(ImVec2(layout.arrow, h));
         };
 
         draw_field(true);
@@ -911,29 +939,25 @@ void App::draw_prediction_box(const kin::Analysis& a, float width) {
         ImGui::SameLine(0.0f, 0.0f);
         draw_field(false);
 
-        // One line under the fields, always there so that the box keeps its
-        // height: what to do, what went wrong, or what the answer is.
+        // A line under the fields only when something needs saying: the
+        // value is out of the data's range, or cannot be read off.
         const std::string& typedName = calcInputIsX_ ? xName : yName;
         const double lo = calcInputIsX_ ? a.xMin : a.yMin, hi = calcInputIsX_ ? a.xMax : a.yMax;
         std::string note;
-        ImVec4 col = palette().textDim;
-        if (state == CellState::Blank) {
-            note = "Type in either field to read the other off the fitted curve.";
-        } else if (state == CellState::Invalid) {
+        ImVec4 col = palette().bad;
+        if (state == CellState::Invalid) {
             note = "Not a number.";
-            col = palette().bad;
-        } else if (!pt) {
+        } else if (state == CellState::Number && !pt) {
             note = "The fitted curve does not reach " + typedName + " = " + calcInput_ + ".";
-            col = palette().bad;
-        } else if (typedValue < lo || typedValue > hi) {
+        } else if (state == CellState::Number && (typedValue < lo || typedValue > hi)) {
             note = "Extrapolated: the data's " + typedName + " runs from " + kin::fmt_g(lo) + " to " + kin::fmt_g(hi) + ".";
             col = palette().warning;
-        } else {
-            note = "Read off the fitted curve, and marked on the graph by a cross.";
         }
-        ImGui::PushStyleColor(ImGuiCol_Text, col);
-        ImGui::TextWrapped("%s", note.c_str());
-        ImGui::PopStyleColor();
+        if (!note.empty()) {
+            ImGui::PushStyleColor(ImGuiCol_Text, col);
+            ImGui::TextWrapped("%s", note.c_str());
+            ImGui::PopStyleColor();
+        }
     }
     ImGui::EndChild();
 }
